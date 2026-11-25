@@ -1,0 +1,17 @@
+$ErrorActionPreference = 'Stop'
+$projectRoot = Split-Path $PSScriptRoot -Parent
+$toolRoot = Join-Path $projectRoot '.tooling'
+$env:PUB_CACHE = Join-Path $toolRoot 'pub-cache'
+$env:FLUTTER_CONFIG_DIR = Join-Path $toolRoot 'flutter-config'
+$env:FLUTTER_SUPPRESS_ANALYTICS = 'true'
+$env:CI = 'true'
+$env:JAVA_HOME = Join-Path $toolRoot 'java'
+$env:ANDROID_HOME = Join-Path $toolRoot 'android-sdk'
+$env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
+$env:ANDROID_USER_HOME = Join-Path $toolRoot 'android-home'
+$env:GRADLE_USER_HOME = Join-Path $toolRoot 'gradle'
+$env:PATH = "$env:JAVA_HOME\bin;$toolRoot\flutter\bin;$env:PATH"
+$env:GIT_CONFIG_COUNT = '1'
+$env:GIT_CONFIG_KEY_0 = 'safe.directory'
+$env:GIT_CONFIG_VALUE_0 = (Join-Path $toolRoot 'flutter').Replace('\', '/')
+$flutter = Join-Path $toolRoot 'flutter/bin/flutter.bat'

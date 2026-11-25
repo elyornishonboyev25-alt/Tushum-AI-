@@ -121,11 +121,20 @@ Joriy server bitta ilova serveri bilan ishlaydigan SQLite muhitiga mo‘ljallang
 
 ## Railway orqali joylash
 
-Repozitoriy ildizidagi `Dockerfile` Flutter 3.50.0 bilan veb-interfeysni yig‘adi va Python 3.14 konteynerida FastAPI orqali taqdim etadi. Railway servisi uchun Root Directory `/` bo‘ladi. `railway.json` build usulini va `/api/health` tekshiruvini belgilaydi. Port Railway bergan `PORT` qiymatidan olinadi.
+Repozitoriy ildizidagi `Dockerfile` Flutter 3.50.0 bilan veb-interfeysni yig‘adi va Python 3.14 konteynerida FastAPI orqali taqdim etadi. `.railway/railway.ts` yangi `striking-youth / production / Tushum-AI-` servisini boshqaradi: Dockerfile build, `/api/health` tekshiruvi, bitta replica, deploylar orasida nol overlap va `/data` ga ulangan 500 MB doimiy disk.
 
-Servisga `/data` manzilida persistent volume ulang. Konteynerdagi `TUSHUM_DATABASE=/data/tushum.sqlite3` shu diskdagi bazani ishlatadi. Servis bitta replica va bitta Uvicorn worker bilan ishlaydi. Dastlabki joylashda yangi baza yaratiladi. Lokal baza alohida saqlanadi.
+Ishlayotgan manzil: https://tushum-ai-production-fe6eb70d.up.railway.app. `PORT=8080` va `TUSHUM_DATABASE=/data/tushum.sqlite3` Railway Variables orqali beriladi. Shu HTTPS manzilni APK ichidagi Ulanish sozlamalariga ham kiritish mumkin.
 
-Servisning Settings → Networking bo‘limida Generate Domain orqali HTTPS manzil yaratiladi. Brauzer ilovasi shu manzildagi API bilan ishlaydi. APK ichidagi Ulanish sozlamalariga ham ushbu HTTPS manzilni kiritish mumkin. Shaxsiy domen Railway bergan DNS yozuvlari orqali ulanadi.
+Railway konfiguratsiyasini mahalliy tekshirish uchun Railway CLI va Node.js kerak. SDK versiyasi `package.json` va `package-lock.json` da qayd etilgan. Tekshirilgan versiyalar: Railway CLI 5.75.0 va Railway SDK 3.17.0.
+
+```powershell
+npm ci --ignore-scripts
+railway link --project a8ae508f-716e-4333-83c8-050b0c6c479a --environment production --service Tushum-AI-
+railway config plan
+railway config apply --yes
+```
+
+Rejani tekshirgandan keyin apply bajariladi. SDK rejasida diskni uzish yoki o‘chirish bo‘lmasligi kerak. Maxfiy o‘zgaruvchilar IaC tomonidan boshqarilmaydi (`variables.managed=false`); Telegram sessiyasi, Gemini API kaliti va USMS rekvizitlari faqat Railway Variables da saqlanadi. Baza, sessiya va maxfiy qiymatlar Git’ga kiritilmaydi. Server bitta worker bilan ishlaydi; bir Telegram sessiyasini bir nechta serverda parallel yoqmang.
 
 ## USMS ulanishi
 

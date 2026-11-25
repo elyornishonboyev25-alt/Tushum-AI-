@@ -21,3 +21,4 @@ design
 scripts
 **/*.jks
 **/*.keystore
+node_modules/

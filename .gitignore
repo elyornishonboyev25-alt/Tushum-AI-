@@ -40,3 +40,4 @@ coverage/
 *.key
 *.p12
 *.pfx
+node_modules/

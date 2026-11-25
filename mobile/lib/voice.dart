@@ -31,6 +31,7 @@ bool activeCall(Json row) =>
     ['queued', 'dialing', 'connected'].contains(row['status']);
 
 String voiceError(dynamic code) => switch (text(code)) {
+  'audio_quality' => 'Ovoz oqimida uzilish bo‘ldi. Noaniq nutq asosida davom etilmadi. Ulanishni tekshiring.',
   'ai_quota' =>
     'AI xizmatining kvotasi tugagan. Google AI hisobidagi limitni tekshiring.',
   'ai_access' => 'AI xizmatiga kirish ruxsatini tekshirish kerak.',

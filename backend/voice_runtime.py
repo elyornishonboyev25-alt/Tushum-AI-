@@ -8,13 +8,13 @@ import json
 import logging
 import os
 import time
-from array import array
-from collections import deque
 from contextlib import suppress
 from pathlib import Path
 
 from . import database, voice
+from .voice_audio import SpeechOutput
 from .voice_policy import TOOLS, instructions
+from .voice_transcription import CustomerTranscription
 from .voice_turns import ClosingGate, OpeningGate
 
 log = logging.getLogger(__name__)
@@ -49,20 +49,36 @@ def configuration():
     )
 
 
-def live_config(context, model="gemini-3.8-live"):
+def live_config(context, model="gemini-3.8-live", *, voice_name=None):
     tools = copy.deepcopy(TOOLS)
     config = {
         "response_modalities": ["AUDIO"],
         "system_instruction": instructions(context),
         "speech_config": {
-            "voice_config": {"prebuilt_voice_config": {"voice_name": "Aoede"}}
+            "voice_config": {
+                "prebuilt_voice_config": {
+                    "voice_name": voice_name or os.getenv("TUSHUM_VOICE_NAME", "Kore")
+                }
+            }
         },
         "input_audio_transcription": {
-            "language_codes": ["uz-UZ"],
+            "language_codes": ["uz-UZ", "ru-RU"],
             "custom_vocabulary": [
                 "Tushum AI",
                 "nasiya",
                 "so‘m",
+                "qarzdorlik",
+                "to‘lov",
+                "va’da",
+                "muddat",
+                "tasdiqlayman",
+                "bo‘lib to‘lash",
+                "qayta qo‘ng‘iroq",
+                "задолженность",
+                "оплата",
+                "рассрочка",
+                "подтверждаю",
+                "сум",
                 str(context.get("business", ""))[:120],
                 str(context.get("customer", ""))[:100],
             ],
@@ -72,9 +88,9 @@ def live_config(context, model="gemini-3.8-live"):
         "realtime_input_config": {
             "automatic_activity_detection": {
                 "start_of_speech_sensitivity": "START_SENSITIVITY_HIGH",
-                "end_of_speech_sensitivity": "END_SENSITIVITY_HIGH",
-                "prefix_padding_ms": 160,
-                "silence_duration_ms": 800,
+                "end_of_speech_sensitivity": "END_SENSITIVITY_LOW",
+                "prefix_padding_ms": 320,
+                "silence_duration_ms": 900,
             }
         },
     }
@@ -83,17 +99,6 @@ def live_config(context, model="gemini-3.8-live"):
         for tool in tools[0]["function_declarations"]:
             tool["behavior"] = "NON_BLOCKING"
     return config
-
-
-def upsample_24k(pcm: bytes) -> bytes:
-    """2× linear interpolation, PCM signed 16-bit little-endian mono."""
-    samples = array("h")
-    samples.frombytes(pcm[: len(pcm) // 2 * 2])
-    result = array("h")
-    for index, sample in enumerate(samples):
-        following = samples[index + 1] if index + 1 < len(samples) else sample
-        result.extend((sample, (sample + following) // 2))
-    return result.tobytes()
 
 
 def resolved_target_matches(peer, target):
@@ -115,8 +120,8 @@ class VoiceRuntime:
         self.calls = None
         self.active_peer = None
         self.incoming = asyncio.Queue(maxsize=80)
-        self.audio = deque()
-        self.remainder = b""
+        self.output = SpeechOutput()
+        self.input_overflow = False
 
     async def start(self):
         self.incoming = asyncio.Queue(maxsize=80)
@@ -186,7 +191,8 @@ class VoiceRuntime:
                     return
                 for frame in update.frames:
                     if self.incoming.full():
-                        self.incoming.get_nowait()
+                        self.input_overflow = True
+                        return
                     self.incoming.put_nowait(frame.frame)
 
             await self.calls.start()
@@ -255,8 +261,8 @@ class VoiceRuntime:
             _, fresh_context = voice.context_for(c, dict(actor), dict(debt))
         call["context_json"] = json.dumps(fresh_context, ensure_ascii=False)
         voice.change_status(call_id, "dialing")
-        self.audio.clear()
-        self.remainder = b""
+        self.output.reset()
+        self.input_overflow = False
         while not self.incoming.empty():
             self.incoming.get_nowait()
         stop = asyncio.Event()
@@ -273,6 +279,7 @@ class VoiceRuntime:
         tasks = []
         opening = OpeningGate()
         closing = ClosingGate()
+        customer_transcription = CustomerTranscription()
         ai = genai.Client(
             api_key=config["api_key"], http_options={"api_version": "v1beta"}
         )
@@ -335,6 +342,10 @@ class VoiceRuntime:
                 connected_at = time.monotonic()
 
                 def flush(who):
+                    if who == "user":
+                        # Output audio/tool messages do not make an interim user
+                        # hypothesis final. Input and output arrive independently.
+                        return
                     content = state[who]
                     if content:
                         voice.transcript(
@@ -350,6 +361,8 @@ class VoiceRuntime:
                 async def send_input():
                     while True:
                         data = await self.incoming.get()
+                        if self.input_overflow:
+                            raise RuntimeError("audio_input_overflow")
                         await live.send_realtime_input(
                             audio=types.Blob(
                                 data=data, mime_type="audio/pcm;rate=16000"
@@ -359,8 +372,16 @@ class VoiceRuntime:
                 async def play_output():
                     next_tick = time.monotonic()
                     while True:
-                        frame = self.audio.popleft() if self.audio else bytes(960)
+                        frame = self.output.read_frame()
+                        is_generated_audio = self.output.last_read_was_audio
                         await self.calls.send_frame(peer.id, Device.MICROPHONE, frame)
+                        if is_generated_audio and not state["first_audio"]:
+                            state["first_audio"] = True
+                            voice.change_status(
+                                call_id,
+                                "connected",
+                                latency=int((time.monotonic() - connected_at) * 1000),
+                            )
                         next_tick += 0.01
                         await asyncio.sleep(max(0, next_tick - time.monotonic()))
                         if time.monotonic() - next_tick > 0.15:
@@ -372,22 +393,41 @@ class VoiceRuntime:
                             content = message.server_content
                             if content:
                                 if content.interrupted:
-                                    self.audio.clear()
-                                    self.remainder = b""
+                                    self.output.reset()
                                     flush("ai")
                                     state["turn"] += 1
+                                if (
+                                    content.interim_input_transcription
+                                    and content.interim_input_transcription.text
+                                ):
+                                    opening.recipient_answered = True
+                                    index, words, final = (
+                                        customer_transcription.preview(
+                                            content.interim_input_transcription.text
+                                        )
+                                    )
+                                    voice.transcript(
+                                        call_id,
+                                        f"user-{index}",
+                                        "customer",
+                                        words,
+                                        final,
+                                    )
                                 if (
                                     content.input_transcription
                                     and content.input_transcription.text
                                 ):
                                     opening.recipient_answered = True
-                                    state["user"] += content.input_transcription.text
+                                    index, words, final = customer_transcription.accept(
+                                        content.input_transcription.text,
+                                        content.input_transcription.finished,
+                                    )
                                     voice.transcript(
                                         call_id,
-                                        f"user-{state['user_index']}",
+                                        f"user-{index}",
                                         "customer",
-                                        state["user"],
-                                        bool(content.input_transcription.finished),
+                                        words,
+                                        final,
                                     )
                                 if (
                                     content.output_transcription
@@ -406,39 +446,19 @@ class VoiceRuntime:
                                     for part in content.model_turn.parts or []:
                                         if part.inline_data and part.inline_data.data:
                                             closing.output()
-                                            if not state["first_audio"]:
-                                                state["first_audio"] = True
-                                                voice.change_status(
-                                                    call_id,
-                                                    "connected",
-                                                    latency=int(
-                                                        (
-                                                            time.monotonic()
-                                                            - connected_at
-                                                        )
-                                                        * 1000
-                                                    ),
-                                                )
-                                            pcm = self.remainder + upsample_24k(
-                                                part.inline_data.data
+                                            self.output.write(
+                                                part.inline_data.data,
+                                                part.inline_data.mime_type
+                                                or "audio/pcm;rate=24000",
                                             )
-                                            for offset in range(0, len(pcm) - 959, 960):
-                                                if len(self.audio) >= 2000:
-                                                    raise RuntimeError("audio_backlog")
-                                                self.audio.append(
-                                                    pcm[offset : offset + 960]
-                                                )
-                                            self.remainder = pcm[
-                                                len(pcm) // 960 * 960 :
-                                            ]
+                                if content.generation_complete:
+                                    # Audio generation can finish before the full
+                                    # interaction: release the final filter samples now.
+                                    self.output.finish()
                                 if content.turn_complete:
                                     flush("user")
                                     flush("ai")
-                                    if self.remainder:
-                                        self.audio.append(
-                                            self.remainder.ljust(960, b"\0")
-                                        )
-                                        self.remainder = b""
+                                    self.output.finish()
                                     state["turn"] += 1
                                     opening.greeting_complete = True
                                     if closing.requested_at is not None:
@@ -477,6 +497,9 @@ class VoiceRuntime:
                                                     "yaxshi qoling",
                                                     "xayr",
                                                     "salomat bo",
+                                                    "до свидания",
+                                                    "всего доброго",
+                                                    "хорошего дня",
                                                 )
                                             ),
                                         )
@@ -495,7 +518,7 @@ class VoiceRuntime:
                             voice.change_status(call_id, "cancelled")
                             stop.set()
                             return
-                        drained = not self.audio and not self.remainder
+                        drained = self.output.drained
                         if closing.ready(time.monotonic(), drained):
                             stop.set()
                             return
@@ -572,6 +595,13 @@ class VoiceRuntime:
                 code = "telegram_privacy"
             elif isinstance(exc, ValueError) and str(exc) == "self_call":
                 code = "self_call"
+            elif str(exc) in (
+                "audio_input_overflow",
+                "audio_backlog",
+                "unsupported_audio_format",
+                "incomplete_pcm_sample",
+            ):
+                code = "audio_quality"
             voice.change_status(
                 call_id,
                 "no_answer" if code == "no_answer" else "failed",

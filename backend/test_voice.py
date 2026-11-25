@@ -141,6 +141,10 @@ class VoiceTests(unittest.TestCase):
             ("Yo‘q", True),
             ("Ha, tasdiqlayman", False),
             ("Bilmadim", True),
+            ("Да, но если получится", True),
+            ("Да, не подтверждаю", True),
+            ("Да?", True),
+            ("Тўғри?", True),
         ]:
             voice.transcript(call, "user-1", "customer", answer, final)
             self.assertIn(
@@ -152,6 +156,32 @@ class VoiceTests(unittest.TestCase):
             "error",
             voice.execute_tool(call, "confirm_promise", {"proposal_id": "invented"}),
         )
+
+    def test_natural_russian_confirmation_saves_only_the_agreed_promise(self):
+        call = self.start()
+        proposal = self.propose(call)
+        voice.transcript(
+            call, "ai-1", "ai", "Пятьсот тысяч сумов сегодня. Всё верно?", True
+        )
+        voice.transcript(
+            call, "user-1", "customer", "Да, всё правильно, спасибо.", True
+        )
+        result = voice.execute_tool(call, "confirm_promise", {"proposal_id": proposal})
+        self.assertTrue(result.get("saved"), result)
+        data = self.client.get("/api/workspace", headers=self.headers()).json()
+        self.assertEqual(data["promises"][0]["amount"], 50000000)
+        self.assertEqual(data["payments"], [])
+
+    def test_spoken_russian_half_million_does_not_require_digits(self):
+        call = self.start()
+        voice.change_status(call, "connected")
+        voice.transcript(
+            call, "user-0", "customer", "Полмиллиона сегодня переведу.", True
+        )
+        result = voice.execute_tool(
+            call, "propose_promise", {"amount": "500000", "due_on": today()}
+        )
+        self.assertIn("proposal_id", result)
 
     def test_invalid_amounts_dates_and_fake_payment(self):
         call = self.start()
@@ -736,12 +766,12 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(data["voice_handoffs"][0]["kind"], "payment_claimed")
         self.assertEqual(data["payments"], [])
 
-    def test_uzbek_only_recognition_and_turn_policy(self):
+    def test_bilingual_recognition_and_turn_policy(self):
         from .voice_runtime import live_config
 
         config = live_config({"business": "Baraka", "customer": "Ali"})
         self.assertEqual(
-            config["input_audio_transcription"]["language_codes"], ["uz-UZ"]
+            config["input_audio_transcription"]["language_codes"], ["uz-UZ", "ru-RU"]
         )
         self.assertIn("TWO SEPARATE TURNS", config["system_instruction"])
 

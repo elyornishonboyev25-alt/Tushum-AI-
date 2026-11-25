@@ -692,7 +692,7 @@ def execute_tool(call_id: str, name: str, args: dict) -> dict:
                 customer_words = re.sub(r"[^\w\s]", "", " ".join(utterances).lower())
                 # The assistant repeating the balance is not a customer's payment offer.
                 has_amount = re.search(
-                    r"\b(ming|million|mln|som|yarmini|yarim|yarmi|hammasini|hammasi|toliq|qolganini|тысяч|миллион|сум|половину|всю)\b|\b\d{4,}\b",
+                    r"\b(ming|million(?:ni|dan|ga)?|mln|som|yarmini|yarim|yarmi|hammasini|hammasi|toliq|qolganini|минг|сўм|ярмини|ҳаммасини|тўлиқ|тысяч(?:а|и|у)?|тыс|миллион(?:а|ов|ы)?|полмиллиона|полтора|сум(?:ов)?|половину|всю)\b|\b\d{4,}\b",
                     customer_words,
                 )
                 latest_words = (
@@ -763,7 +763,7 @@ def execute_tool(call_id: str, name: str, args: dict) -> dict:
                     re.sub(r"[^\w\s]", "", answer["text"].lower()) if answer else ""
                 )
                 positive = re.search(
-                    r"\b(ha|xa|mayli|roziman|tasdiqlayman|togri|boladi|boldi|kelishdik|xop|hop|xoop|да|согласен|подтверждаю)\b",
+                    r"\b(ha|xa|mayli|roziman|tasdiqlayman|togri|boladi|boldi|kelishdik|xop|hop|xoop|ҳа|хўп|тўғри|майли|келишдик|тасдиқлайман|да|согласен|согласна|подтверждаю|верно|правильно|договорились)\b",
                     normalized,
                 )
                 negative = re.search(
@@ -801,6 +801,21 @@ def execute_tool(call_id: str, name: str, args: dict) -> dict:
                     "подтверждаю",
                     "верно",
                     "хорошо",
+                    "согласна",
+                    "правильно",
+                    "договорились",
+                    "всё",
+                    "все",
+                    "именно",
+                    "так",
+                    "спасибо",
+                    "ҳа",
+                    "хўп",
+                    "тўғри",
+                    "майли",
+                    "келишдик",
+                    "тасдиқлайман",
+                    "раҳмат",
                 }
                 conditional = any(
                     word not in allowed_words for word in normalized.split()
@@ -812,6 +827,7 @@ def execute_tool(call_id: str, name: str, args: dict) -> dict:
                     or not positive
                     or negative
                     or conditional
+                    or "?" in answer["text"]
                 ):
                     return {
                         "error": "Qayta o‘qishdan keyingi aniq tasdiq yo‘q. Faqat 'ha, tasdiqlayman' kabi aniq javobni so‘rang."

@@ -20,11 +20,17 @@ Shu username orqali qayta qo‘ng‘iroq qilinganda bitta ochiq nasiyaning aynan
 
 ## Suhbat sifati
 
-Standart model `gemini-3.8-live`, ovoz `Aoede`. Tanlov haqiqiy API bilan o‘tkazilgan suhbat va kelishuvni yozish sinovlariga asoslangan. `extended-thinking` varianti til sinovida yaxshi javob bergan bo‘lsa ham, to‘liq kelishuv sinovida vositalarni ishonchli chaqirmagani uchun standart sifatida tanlanmadi. Ovoz 24 kHz PCM dan Telegram uchun 48 kHz PCM ga aylantiriladi. Mijoz ovozi 16 kHz PCM orqali modelga uzatiladi. Audio fayl saqlanmaydi.
+Standart model `gemini-3.8-live`, ovoz `Kore`. `TUSHUM_VOICE_NAME` orqali boshqa qo‘llanadigan ovozni tanlash mumkin. O‘zbekcha va ruscha javoblar hamda aralash nutq qo‘llanadi. Yetti ovoz bir xil ikki tilli matn bilan solishtirildi; bu kichik, sintetik sinov, insonlar baholagan MOS tadqiqoti emas. Talaffuz va tabiiylik uchun haqiqiy foydalanuvchi ovozi bilan tekshiruv kerak.
+
+24 kHz PCM ovoz soxr HQ orqali holatni saqlagan holda 48 kHz PCM ga aylantiriladi. Paket o‘rtasida bo‘lingan 16-bit namunalar tashlab yuborilmaydi; oqim tugaganda filtr qoldig‘i ham chiqariladi. 60 ms boshlang‘ich bufer tarmoqdagi qisqa tebranishlarni yumshatadi. Gap bo‘linganda bufer va filtr birga tozalanadi. Mijoz ovozi 16 kHz PCM orqali uzatiladi. Kirish oqimi to‘lib ketsa, nutqni yashirin kesib davom etish o‘rniga suhbat `audio_quality` kodi bilan yakunlanadi. Audio fayl saqlanmaydi.
 
 `backend/voice_policy.py` versiyalangan suhbat yo‘riqnomasi. Bu model vaznlarini qayta o‘qitish emas. Yo‘riqnoma mijozning savoliga birinchi javob berish, takrorlashni tushunish, tabiiy qisqa gapirish, tanaffusni kutish va noaniq gapni aniqlashtirishni belgilaydi. Birinchi tanishtiruvda AI ekanini ochiq aytadi.
 
-`input_audio_transcription` uchun `uz-UZ` va `ru-RU` til ko‘rsatmalari hamda biznes va mijoz nomlari lug‘ati yuboriladi. Nutqni tanish va model qarorlarida xato bo‘lishi mumkin. Shuning uchun pul yozuvlari model matnidan bevosita olinmaydi, alohida server tekshiruvlaridan o‘tadi. Tasdiq filtri murakkab yoki shartli javobni rad etib, qayta aniqlashtirishni so‘rashi mumkin.
+`input_audio_transcription` uchun `uz-UZ` va `ru-RU` til ko‘rsatmalari, biznes/mijoz nomlari va savdo atamalari lug‘ati yuboriladi. 320 ms oldingi ovoz konteksti va 900 ms sukut chegarasi gap boshini va tabiiy tanaffuslarni saqlashga yordam beradi. Ruscha so‘rovga ruscha, o‘zbekcha so‘rovga o‘zbekcha javob berish yo‘riqnomada belgilangan.
+
+Vaqtinchalik `interim_input_transcription` moliyaviy tasdiq emas. Gemini 3.8 yakuniy `input_transcription` hodisasida `finished` maydonini yubormasligi mumkin; bu holat to‘liq yakuniy matn sifatida alohida qabul qilinadi. AI ovozi yoki tool hodisasi kelishi mijozning vaqtinchalik matnini avtomatik yakunlamaydi. Yakuniy matn oldingi taxminni almashtiradi; summa yoki inkorni taxminiy birlashtirish/tahrirlash bajarilmaydi.
+
+Nutqni tanish va model qarorlarida xato bo‘lishi mumkin. Pul yozuvlari alohida server tekshiruvlaridan o‘tadi. “Да, всё правильно, спасибо” kabi aniq tasdiqlar tushuniladi; “да, но…”, shartli javob, summa/sana tuzatishi yoki savol ko‘rinishidagi “Да?” tasdiq sifatida saqlanmaydi. Inson kabi xatosiz gapirish yoki tushunish kafolati berilmaydi. Bu yangilanish model vaznlarini qayta o‘qitish emas: oqim, tanish sozlamalari va versiyalangan suhbat yo‘riqnomasi yaxshilangan.
 
 ## Railway sozlamalari
 
@@ -39,6 +45,7 @@ Server uchun kerakli muhit o‘zgaruvchilari
 | `TUSHUM_TELEGRAM_SESSION` | Avval tasdiqlangan foydalanuvchi akkauntining StringSession qiymati |
 | `GEMINI_API_KEY` | Ovozli AI uchun server kaliti |
 | `TUSHUM_VOICE_MODEL` | `gemini-3.8-live` |
+| `TUSHUM_VOICE_NAME` | Ixtiyoriy; standart `Kore`. API qo‘llaydigan ovoz nomi |
 | `TUSHUM_VOICE_CALLER` | Kutilayotgan yuboruvchi username |
 | `TUSHUM_VOICE_TARGETS` | Vergul bilan ajratilgan ruxsat etilgan username ro‘yxati |
 | `TUSHUM_VOICE_OWNER_PHONE` | Ulanish beriladigan faol biznes egasining kirish raqami. Sozlanganda aynan shu hisob biznesiga ovozli ulanish o‘tkaziladi, boshqa bizneslar ma’lumotlari ko‘chirilmaydi |
@@ -55,12 +62,22 @@ Ovozli xizmat sozlanmagan yoki Telegram ishlamasa, hisob-kitobning qolgan API fu
 ## Tekshirish
 
 ```powershell
-.venv/Scripts/python.exe -m unittest backend.test_app backend.test_sms backend.test_voice -v
+.venv/Scripts/python.exe -m unittest discover -s backend -t . -v
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Target check
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Target web
 ```
 
-Server testlari bizneslar orasidagi ajratish, rozilik, ruxsat etilgan manzil, bir marta boshlash, bekor qilish, aniq tasdiq, muddat, qoldiq, to‘lovni taxmin qilmaslik va bo‘lib to‘lashning tranzaksiya yaxlitligini tekshiradi.
+Server testlari bizneslar orasidagi ajratish, rozilik, ruxsat etilgan manzil, bir marta boshlash, bekor qilish, aniq tasdiq, muddat, qoldiq, to‘lovni taxmin qilmaslik va bo‘lib to‘lashning tranzaksiya yaxlitligini tekshiradi. `backend.test_voice_audio` ovoz uzunligi, spektr, paket chegaralari, gap oxiri va bo‘lishni; `backend.test_voice_transcription` vaqtinchalik/yakuniy matn va raqam/inkor yaxlitligini tekshiradi.
+
+Sintetik ovoz va real API tekshiruvi noutbukdan bajariladi; Telegram sessiyasi ulanmaydi va hech kimga qo‘ng‘iroq yuborilmaydi:
+
+```powershell
+.venv/Scripts/python.exe scripts/evaluate_voice_quality.py --out backend/data/voice-evaluation
+.venv/Scripts/python.exe scripts/evaluate_voice_roundtrip.py --out backend/data/voice-evaluation --language uz
+.venv/Scripts/python.exe scripts/evaluate_voice_roundtrip.py --out backend/data/voice-evaluation --language ru
+```
+
+Kalit `GEMINI_API_KEY` orqali yoki Gitga kirmaydigan mahalliy JSON uchun `--credentials` bilan beriladi. Sinov API kvotasidan foydalanadi. Sakkiz tanish holati o‘zbekcha, ruscha, aralash nutq, inkor, summa tuzatishi va ikki shovqinli variantni qamrab oladi. Sintetik namunalar real suhbat aniqligini to‘liq o‘lchamaydi. Avtomatik talaffuz bahosi tanlovga yordamchi bo‘lib, mutaxassisning eshitib baholashini almashtirmaydi.
 
 Haqiqiy demo oldidan rozilik bergan telefon bilan quyidagilarni tekshiring
 
@@ -70,4 +87,4 @@ Haqiqiy demo oldidan rozilik bergan telefon bilan quyidagilarni tekshiring
 - To‘laganini aytish, hisobga e’tiroz, noto‘g‘ri odam, aloqadan voz kechish.
 - Internet uzilishi, model kvotasi, telefonning javob bermasligi va server qayta ishga tushishi.
 
-Dashboarddagi birinchi ovoz vaqti aynan shu suhbatdagi o‘lchovdir. Keyingi javoblarning kechikishi, talaffuz sifati va tabiiyligi alohida haqiqiy ovoz sinovida baholanadi. Barcha gaplarni xatosiz tushunish yoki odamdan farqsiz bo‘lish kafolati yo‘q.
+Dashboarddagi birinchi ovoz vaqti — buferdan chiqqan birinchi model PCM paketi Telegramga yuborilguncha o‘lchangan vaqt. Kutish paytidagi sun’iy sukut paketi bu hisobga kirmaydi. Telefon qurilmasidagi yakuniy eshitish kechikishi alohida. Keyingi javoblarning kechikishi, talaffuz sifati va tabiiyligi haqiqiy ovoz sinovida baholanadi. Barcha gaplarni xatosiz tushunish yoki odamdan farqsiz bo‘lish kafolati yo‘q.

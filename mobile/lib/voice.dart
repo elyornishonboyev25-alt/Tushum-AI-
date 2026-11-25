@@ -252,7 +252,7 @@ class _VoicePageState extends State<VoicePage> {
                         child: Material(
                           color: selected == row['id']
                               ? Palette.soft
-                              : Colors.white,
+                              : Palette.surface,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
                             side: BorderSide(
@@ -371,7 +371,7 @@ class _VoicePageState extends State<VoicePage> {
   Widget _connectionCard(bool ready, bool bound) => Container(
     padding: const EdgeInsets.all(22),
     decoration: BoxDecoration(
-      color: Palette.ink,
+      color: Palette.surface,
       borderRadius: BorderRadius.circular(20),
     ),
     child: Column(
@@ -392,7 +392,7 @@ class _VoicePageState extends State<VoicePage> {
                     ? 'Ovozli xizmat ulanmoqda'
                     : 'Telegram orqali AI suhbat',
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: Palette.ink,
                   fontWeight: FontWeight.w700,
                   fontSize: 18,
                 ),
@@ -419,7 +419,7 @@ class _VoicePageState extends State<VoicePage> {
                     connection['profile']['complete'] == true
                 ? '${connection['profile']['business_name']}\nMas’ul: ${connection['profile']['manager_name']} · ${connection['profile']['phone']}'
                 : 'Boshlashdan oldin do‘kon nomi va mas’ul menejer ma’lumotlarini tasdiqlang.',
-            style: const TextStyle(color: Colors.white, height: 1.6),
+            style: const TextStyle(color: Palette.ink, height: 1.6),
           ),
           if (widget.store.isOwner && !calls.any(activeCall))
             TextButton(
@@ -597,7 +597,7 @@ class _VoicePageState extends State<VoicePage> {
         if (handoff != null) ...[
           const SizedBox(height: 16),
           Surface(
-            color: const Color(0xFFFFF7EB),
+            color: Palette.warningSoft,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -623,7 +623,7 @@ class _VoicePageState extends State<VoicePage> {
           Surface(
             color: row['promise_id'] != null
                 ? Palette.soft
-                : const Color(0xFFFFF4DE),
+                : Palette.warningSoft,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -790,9 +790,11 @@ class StartVoiceDialog extends StatefulWidget {
     super.key,
     required this.store,
     required this.connection,
+    this.initialCustomerId,
   });
   final AppStore store;
   final Json connection;
+  final String? initialCustomerId;
   @override
   State<StartVoiceDialog> createState() => _StartVoiceDialogState();
 }
@@ -804,6 +806,40 @@ class _StartVoiceDialogState extends State<StartVoiceDialog> {
   bool busy = false;
   String? error;
   final operationId = uuid.v4();
+
+  @override
+  void initState() {
+    super.initState();
+    final customerId = widget.initialCustomerId;
+    if (customerId == null) return;
+    final debts = widget.store
+        .rows('debts')
+        .where(
+          (d) =>
+              d['customer_id'] == customerId &&
+              integer(d['balance']) > 0 &&
+              integer(d['archived']) == 0,
+        );
+    if (debts.isNotEmpty) debtId = text(debts.first['id']);
+    target = targetForDebt(debtId);
+  }
+
+  String? targetForDebt(String? id) {
+    final debt = widget.store.find('debts', id ?? '');
+    final username = text(
+      widget.store.find(
+        'customers',
+        text(debt?['customer_id']),
+      )?['telegram_username'],
+    ).replaceFirst('@', '');
+    final targets = (widget.connection['targets'] as List? ?? []).map(text);
+    if (username.isNotEmpty &&
+        (widget.connection['custom_targets'] == true ||
+            targets.contains(username))) {
+      return username;
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -848,11 +884,19 @@ class _StartVoiceDialogState extends State<StartVoiceDialog> {
                       ),
                     )
                     .toList(),
-                onChanged: busy ? null : (v) => setState(() => debtId = v),
+                onChanged: busy
+                    ? null
+                    : (v) => setState(() {
+                        debtId = v;
+                        target = targetForDebt(v);
+                        consent = false;
+                      }),
               ),
               const SizedBox(height: 16),
               if (widget.connection['custom_targets'] == true)
                 TextFormField(
+                  key: ValueKey('target-$debtId'),
+                  initialValue: target,
                   autocorrect: false,
                   enableSuggestions: false,
                   maxLength: 33,
@@ -866,6 +910,7 @@ class _StartVoiceDialogState extends State<StartVoiceDialog> {
                 )
               else
                 DropdownButtonFormField<String>(
+                  key: ValueKey('target-$debtId'),
                   initialValue: target,
                   decoration: const InputDecoration(
                     labelText: 'Telegram akkaunti',

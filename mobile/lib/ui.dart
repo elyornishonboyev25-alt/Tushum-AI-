@@ -3,60 +3,91 @@ import 'package:material_ui/material_ui.dart';
 import 'core.dart';
 
 abstract final class Palette {
-  static const ink = Color(0xFF182D3D);
-  static const muted = Color(0xFF526574);
-  static const teal = Color(0xFF0C5F69);
-  static const background = Color(0xFFF3F6F8);
-  static const line = Color(0xFFE3E9ED);
-  static const soft = Color(0xFFE9F3F2);
-  static const green = Color(0xFF177351);
-  static const amber = Color(0xFF9C4B10);
-  static const red = Color(0xFFB63838);
+  static const ink = Color(0xFFF9FAFB);
+  static const muted = Color(0xFF9CA3AF);
+  static const teal = Color(0xFF10B981);
+  static const blue = Color(0xFF3B82F6);
+  static const background = Color(0xFF0B0F19);
+  static const surface = Color(0xFF111827);
+  static const line = Color(0xFF1F2937);
+  static const soft = Color(0xFF12352D);
+  static const blueSoft = Color(0xFF101F39);
+  static const warningSoft = Color(0xFF31271A);
+  static const green = Color(0xFF10B981);
+  static const amber = Color(0xFFF59E0B);
+  static const red = Color(0xFFEF4444);
 }
 
 ThemeData buildTheme() {
-  final colors = ColorScheme.fromSeed(
-    seedColor: Palette.teal,
-    brightness: Brightness.light,
-    surface: Colors.white,
-  );
+  final colors =
+      ColorScheme.fromSeed(
+        seedColor: Palette.teal,
+        brightness: Brightness.dark,
+        surface: Palette.surface,
+      ).copyWith(
+        primary: Palette.teal,
+        onPrimary: const Color(0xFF062A20),
+        secondary: Palette.blue,
+        onSurface: Palette.ink,
+        error: Palette.red,
+        outline: Palette.line,
+      );
+  const numbers = [FontFeature.tabularFigures()];
   return ThemeData(
     useMaterial3: true,
+    brightness: Brightness.dark,
     colorScheme: colors,
     scaffoldBackgroundColor: Palette.background,
-    fontFamily: 'InstrumentSans',
+    fontFamily: 'Inter',
     textTheme: const TextTheme(
       headlineLarge: TextStyle(
-        fontSize: 32,
+        fontSize: 30,
         fontWeight: FontWeight.w700,
-        letterSpacing: -1.1,
+        letterSpacing: -1,
         color: Palette.ink,
+        fontFeatures: numbers,
       ),
       headlineMedium: TextStyle(
-        fontSize: 26,
+        fontSize: 25,
         fontWeight: FontWeight.w700,
-        letterSpacing: -.6,
+        letterSpacing: -.7,
         color: Palette.ink,
+        fontFeatures: numbers,
       ),
       titleLarge: TextStyle(
-        fontSize: 21,
-        fontWeight: FontWeight.w700,
+        fontSize: 20,
+        fontWeight: FontWeight.w600,
         color: Palette.ink,
+        fontFeatures: numbers,
       ),
       titleMedium: TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w700,
+        fontSize: 15,
+        fontWeight: FontWeight.w600,
         color: Palette.ink,
+        fontFeatures: numbers,
       ),
-      bodyLarge: TextStyle(fontSize: 16, color: Palette.ink),
-      bodyMedium: TextStyle(fontSize: 14, color: Palette.ink),
-      bodySmall: TextStyle(fontSize: 12, color: Palette.muted),
+      bodyLarge: TextStyle(
+        fontSize: 16,
+        color: Palette.ink,
+        fontFeatures: numbers,
+      ),
+      bodyMedium: TextStyle(
+        fontSize: 14,
+        color: Palette.ink,
+        fontFeatures: numbers,
+      ),
+      bodySmall: TextStyle(
+        fontSize: 12,
+        color: Palette.muted,
+        fontFeatures: numbers,
+      ),
     ),
     appBarTheme: const AppBarTheme(
-      backgroundColor: Colors.white,
+      backgroundColor: Palette.background,
       foregroundColor: Palette.ink,
       surfaceTintColor: Colors.transparent,
       centerTitle: false,
+      elevation: 0,
     ),
     dividerTheme: const DividerThemeData(
       color: Palette.line,
@@ -66,50 +97,59 @@ ThemeData buildTheme() {
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         backgroundColor: Palette.teal,
-        foregroundColor: Colors.white,
-        minimumSize: const Size(48, 52),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        overlayColor: const Color(0xFF059669),
+        foregroundColor: const Color(0xFF062A20),
+        minimumSize: const Size(44, 44),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
         textStyle: const TextStyle(
-          fontFamily: 'InstrumentSans',
-          fontWeight: FontWeight.w700,
-          fontSize: 15,
+          fontFamily: 'Inter',
+          fontWeight: FontWeight.w600,
+          fontSize: 14,
         ),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        foregroundColor: Palette.teal,
-        minimumSize: const Size(48, 50),
-        side: const BorderSide(color: Color(0xFFD0DDE3)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        foregroundColor: Palette.ink,
+        minimumSize: const Size(44, 44),
+        side: const BorderSide(color: Palette.line),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      fillColor: Palette.background,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(9),
         borderSide: const BorderSide(color: Palette.line),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFCFDAE1)),
+        borderRadius: BorderRadius.circular(9),
+        borderSide: const BorderSide(color: Palette.line),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(9),
+        borderSide: const BorderSide(color: Palette.teal),
       ),
       floatingLabelStyle: const TextStyle(color: Palette.teal),
     ),
     navigationBarTheme: const NavigationBarThemeData(
-      backgroundColor: Colors.white,
+      backgroundColor: Palette.surface,
       indicatorColor: Palette.soft,
-      height: 72,
+      height: 70,
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: Palette.ink,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      backgroundColor: const Color(0xFF243247),
+      contentTextStyle: const TextStyle(color: Palette.ink),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     ),
     progressIndicatorTheme: const ProgressIndicatorThemeData(
       color: Palette.teal,
+    ),
+    tooltipTheme: const TooltipThemeData(
+      waitDuration: Duration(milliseconds: 350),
     ),
   );
 }
@@ -150,7 +190,7 @@ class Surface extends StatelessWidget {
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(18),
-    this.color = Colors.white,
+    this.color = Palette.surface,
   });
   final Widget child;
   final EdgeInsetsGeometry padding;

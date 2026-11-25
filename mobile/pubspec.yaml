@@ -63,6 +63,9 @@ flutter:
   # the material Icons class.
   uses-material-design: true
   fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter.ttf
     - family: InstrumentSans
       fonts:
         - asset: assets/fonts/InstrumentSans-Regular.ttf

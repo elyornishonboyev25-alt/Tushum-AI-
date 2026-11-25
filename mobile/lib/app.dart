@@ -10,7 +10,7 @@ import 'insights.dart';
 import 'settings.dart';
 import 'spreadsheet_import.dart';
 import 'voice.dart';
-import 'voice_dashboard.dart';
+import 'executive_dashboard.dart';
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key, required this.store});
@@ -94,33 +94,9 @@ class _AuthPageState extends State<AuthPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: Palette.teal,
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    child: const Icon(
-                      Icons.south_west_rounded,
-                      color: Colors.white,
-                      size: 31,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Text(
-                    'tushum',
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -1,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  const StatusTag('AI', color: Palette.teal),
-                ],
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: TushumBrand(),
               ),
               const SizedBox(height: 36),
               Text(
@@ -371,9 +347,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final store = widget.store;
     final wide = MediaQuery.sizeOf(context).width >= 900;
+    final compact = MediaQuery.sizeOf(context).width < 600;
     final unread = store
         .rows('notifications')
-        .where((item) => item['read'] != true)
+        .where((n) => n['read'] != true)
         .length;
     final pages = [
       HomePage(store: store, showCustomers: () => selectTab(1)),
@@ -382,53 +359,133 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ActivityPage(store: store),
       ReportsPage(store: store),
     ];
+    void voice() => Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => VoicePage(store: store)),
+    );
+    void upload() => Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => SpreadsheetImportPage(store: store)),
+    );
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 74,
+        titleSpacing: compact ? 16 : 24,
+        shape: const Border(bottom: BorderSide(color: Palette.line)),
         title: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.south_west_rounded, color: Palette.teal),
-            const SizedBox(width: 8),
-            const Text(
-              'tushum',
-              style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.7),
-            ),
-            if (integer(store.business['is_demo']) == 1)
-              const Padding(
-                padding: EdgeInsets.only(left: 12),
-                child: StatusTag('Demo', color: Palette.teal),
+            TushumBrand(compact: compact),
+            SizedBox(width: compact ? 12 : 40),
+            if (!compact) Container(width: 1, height: 25, color: Palette.line),
+            if (!compact) const SizedBox(width: 20),
+            Flexible(
+              child: PopupMenuButton<String>(
+                tooltip: 'Biznesni tanlash',
+                onSelected: (value) {
+                  if (value == 'settings') openSettings();
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'current',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.check, size: 18, color: Palette.teal),
+                        const SizedBox(width: 10),
+                        Flexible(child: Text(text(store.business['name']))),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'settings',
+                    child: Text('Biznes sozlamalari'),
+                  ),
+                ],
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!compact) ...[
+                      Container(
+                        width: 29,
+                        height: 29,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: Palette.line,
+                          borderRadius: BorderRadius.circular(7),
+                        ),
+                        child: Text(
+                          initials(text(store.business['name'])),
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    Flexible(
+                      child: Text(
+                        text(store.business['name']),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: compact ? 12 : 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                    const Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      size: 17,
+                      color: Palette.muted,
+                    ),
+                  ],
+                ),
               ),
+            ),
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: 'AI suhbatlar',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => VoicePage(store: store)),
+          if (compact)
+            IconButton(
+              tooltip: 'Excel yuklash',
+              onPressed: store.canEdit ? upload : null,
+              icon: const Icon(Icons.upload_file_outlined, color: Palette.teal),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(right: 18),
+              child: FilledButton.icon(
+                onPressed: store.canEdit ? upload : null,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Excel yuklash'),
+              ),
             ),
-            icon: const Icon(Icons.headset_mic_outlined),
-          ),
-          IconButton(
-            tooltip: 'Yangilash',
-            onPressed: store.refreshing ? null : store.refresh,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
+          if (!compact)
+            IconButton(
+              tooltip: 'Yangilash',
+              onPressed: store.refreshing ? null : store.refresh,
+              icon: const Icon(Icons.refresh_rounded, size: 20),
+            ),
           Badge(
             isLabelVisible: unread > 0,
             label: Text('$unread'),
             child: IconButton(
               tooltip: 'Bildirishnomalar',
               onPressed: openNotifications,
-              icon: const Icon(Icons.notifications_none_rounded),
+              icon: const Icon(Icons.notifications_none_rounded, size: 21),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.only(right: 12, left: 8),
+            padding: EdgeInsets.only(
+              right: compact ? 8 : 18,
+              left: compact ? 0 : 8,
+            ),
             child: IconButton(
               tooltip: 'Sozlamalar',
               onPressed: openSettings,
-              icon: PersonAvatar(text(store.me['name']), size: 34),
+              icon: PersonAvatar(text(store.me['name']), size: 30),
             ),
           ),
         ],
@@ -438,75 +495,142 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         children: [
           if (wide)
             Container(
-              width: 220,
+              width: 208,
               decoration: const BoxDecoration(
-                color: Colors.white,
+                color: Palette.background,
                 border: Border(right: BorderSide(color: Palette.line)),
               ),
-              child: Material(
-                color: Colors.white,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(24, 28, 20, 14),
+                    child: Text(
+                      'ISH MAYDONI',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        color: Palette.muted,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.3,
+                      ),
+                    ),
+                  ),
+                  for (var i = 0; i < labels.length; i++)
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(22, 28, 20, 24),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 3,
+                      ),
+                      child: ListTile(
+                        dense: true,
+                        minLeadingWidth: 22,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        selected: selected == i,
+                        selectedTileColor: Palette.soft,
+                        selectedColor: Palette.teal,
+                        iconColor: Palette.muted,
+                        textColor: Palette.muted,
+                        leading: Icon(icons[i], size: 20),
+                        title: Text(
+                          i == 0 ? 'Boshqaruv paneli' : labels[i],
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        onTap: () => selectTab(i),
+                      ),
+                    ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+                    child: Divider(),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: ListTile(
+                      dense: true,
+                      minLeadingWidth: 22,
+                      leading: const Icon(
+                        Icons.headset_mic_outlined,
+                        size: 20,
+                        color: Palette.blue,
+                      ),
+                      title: const Text(
+                        'AI suhbatlar',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      trailing: const Icon(
+                        Icons.arrow_outward,
+                        size: 13,
+                        color: Palette.muted,
+                      ),
+                      onTap: voice,
+                    ),
+                  ),
+                  const Spacer(),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Palette.surface,
+                        border: Border.all(color: Palette.line),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            text(store.business['name']),
-                            style: Theme.of(context).textTheme.titleMedium,
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.verified_user_outlined,
+                                color: Palette.teal,
+                                size: 15,
+                              ),
+                              const SizedBox(width: 7),
+                              Text(
+                                store.business['is_demo'] == 1
+                                    ? 'Demo ish maydoni'
+                                    : 'Biznes ish maydoni',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 7),
                           Text(
                             roleLabel(text(store.me['role'])),
-                            style: const TextStyle(color: Palette.muted),
+                            style: const TextStyle(
+                              color: Palette.muted,
+                              fontSize: 10.5,
+                            ),
                           ),
                         ],
                       ),
                     ),
-                    for (var i = 0; i < labels.length; i++)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 3,
-                        ),
-                        child: ListTile(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          selected: selected == i,
-                          selectedTileColor: Palette.soft,
-                          selectedColor: Palette.teal,
-                          leading: Icon(icons[i]),
-                          title: Text(labels[i]),
-                          onTap: () => selectTab(i),
-                        ),
-                      ),
-                    const Spacer(),
-                    ListTile(
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
+                    child: ListTile(
+                      dense: true,
+                      minLeadingWidth: 22,
                       leading: const Icon(
-                        Icons.headset_mic_outlined,
-                        color: Palette.teal,
+                        Icons.settings_outlined,
+                        size: 19,
+                        color: Palette.muted,
                       ),
-                      title: const Text('AI suhbatlar'),
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => VoicePage(store: store),
-                        ),
+                      title: const Text(
+                        'Sozlamalar',
+                        style: TextStyle(fontSize: 12, color: Palette.muted),
                       ),
+                      onTap: openSettings,
                     ),
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: ListTile(
-                        leading: const Icon(Icons.settings_outlined),
-                        title: const Text('Sozlamalar'),
-                        onTap: openSettings,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           Expanded(
@@ -517,7 +641,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 if (store.error != null)
                   Container(
                     width: double.infinity,
-                    color: const Color(0xFFFFF3DE),
+                    color: Palette.warningSoft,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,
                       vertical: 10,
@@ -528,7 +652,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           : store.error!,
                       style: const TextStyle(
                         color: Palette.amber,
-                        fontSize: 13,
+                        fontSize: 12,
                       ),
                     ),
                   ),
@@ -550,7 +674,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               onDestinationSelected: selectTab,
               destinations: [
                 for (var i = 0; i < labels.length; i++)
-                  NavigationDestination(icon: Icon(icons[i]), label: labels[i]),
+                  NavigationDestination(
+                    icon: Icon(icons[i], size: 21),
+                    label: labels[i],
+                  ),
               ],
             ),
     );
@@ -589,307 +716,8 @@ class HomePage extends StatelessWidget {
   final AppStore store;
   final VoidCallback showCustomers;
   @override
-  Widget build(BuildContext context) {
-    final customers = store
-        .rows('customers')
-        .where((row) => integer(row['archived']) == 0)
-        .toList();
-    final debts = store.rows('debts');
-    final balance = debts.fold<int>(
-      0,
-      (sum, row) => sum + integer(row['balance']),
-    );
-    final overdue = debts
-        .where((row) => row['overdue'] == true)
-        .fold<int>(0, (sum, row) => sum + integer(row['balance']));
-    final month = store.currentDay.substring(0, 7);
-    final gross = store
-        .rows('payments')
-        .where((row) => text(row['paid_on']).startsWith(month))
-        .fold<int>(0, (sum, row) => sum + integer(row['amount']));
-    final refunds = store
-        .rows('refunds')
-        .where((row) => text(row['refunded_on']).startsWith(month))
-        .fold<int>(0, (sum, row) => sum + integer(row['amount']));
-    final tasks = store.rows('notifications');
-    customers.sort(
-      (a, b) => integer(b['balance']).compareTo(integer(a['balance'])),
-    );
-    return ContentList(
-      onRefresh: () async {
-        await store.refresh();
-      },
-      children: [
-        Text(
-          'Assalomu alaykum, ${text(store.me['name']).split(' ').first}',
-          style: const TextStyle(color: Palette.muted, fontSize: 14),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Bugungi nazorat',
-          style: Theme.of(context).textTheme.headlineLarge,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          '${displayDate(store.currentDay)} · ${text(store.business['name'])}',
-          style: const TextStyle(color: Palette.muted),
-        ),
-        const SizedBox(height: 18),
-        Surface(
-          color: Palette.soft,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.headset_mic_outlined, color: Palette.teal),
-                  SizedBox(width: 10),
-                  Text(
-                    'AI suhbatlar',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Telegram qo‘ng‘iroqlari va mijoz bilan kelishuvlar.',
-                style: TextStyle(color: Palette.muted),
-              ),
-              const SizedBox(height: 14),
-              FilledButton.icon(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => VoicePage(store: store)),
-                ),
-                icon: const Icon(Icons.arrow_forward),
-                label: const Text('AI suhbatlarni ochish'),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-        VoiceDashboard(
-          store: store,
-          openCall: (id) => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => VoicePage(store: store, initialCallId: id),
-            ),
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: Palette.teal,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Jami nasiya qoldig‘i',
-                style: TextStyle(color: Color(0xFFCBDFDF), fontSize: 14),
-              ),
-              const SizedBox(height: 10),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  formatMoney(balance),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 36,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -1.2,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 22),
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Shu oy sof tushum',
-                          style: TextStyle(
-                            color: Color(0xFFCBDFDF),
-                            fontSize: 12,
-                          ),
-                        ),
-                        const SizedBox(height: 5),
-                        FittedBox(
-                          child: Text(
-                            formatMoney(gross - refunds),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    height: 36,
-                    width: 1,
-                    color: Colors.white24,
-                    margin: const EdgeInsets.symmetric(horizontal: 20),
-                  ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Muddati o‘tgan',
-                          style: TextStyle(
-                            color: Color(0xFFCBDFDF),
-                            fontSize: 12,
-                          ),
-                        ),
-                        const SizedBox(height: 5),
-                        FittedBox(
-                          child: Text(
-                            formatMoney(overdue),
-                            style: const TextStyle(
-                              color: Color(0xFFFFD7AB),
-                              fontWeight: FontWeight.w700,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        if (store.canEdit)
-          Padding(
-            padding: const EdgeInsets.only(top: 16),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 10,
-              children: [
-                FilledButton.icon(
-                  onPressed: () => customerForm(context, store),
-                  icon: const Icon(Icons.person_add_alt_1_outlined, size: 20),
-                  label: const Text('Mijoz qo‘shish'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => SpreadsheetImportPage(store: store),
-                    ),
-                  ),
-                  icon: const Icon(Icons.upload_file_outlined, size: 20),
-                  label: const Text('Excel import'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => VoicePage(store: store)),
-                  ),
-                  icon: const Icon(Icons.headset_mic_outlined, size: 20),
-                  label: const Text('AI suhbat'),
-                ),
-              ],
-            ),
-          ),
-        SectionHeader(
-          'E’tibor talab qiladi',
-          action: Text(
-            '${tasks.length} ta',
-            style: const TextStyle(color: Palette.muted),
-          ),
-        ),
-        Surface(
-          padding: EdgeInsets.zero,
-          child: tasks.isEmpty
-              ? const EmptyState(
-                  title: 'Bugungi ishlar tartibda',
-                  message:
-                      'Muddati kelgan nasiya va va’dalar shu yerda ko‘rinadi.',
-                  icon: Icons.task_alt,
-                )
-              : Column(
-                  children: [
-                    for (final task in tasks.take(6))
-                      TaskRow(
-                        task: task,
-                        onTap: () => openCustomer(
-                          context,
-                          store,
-                          text(task['customer_id']),
-                        ),
-                      ),
-                  ],
-                ),
-        ),
-        SectionHeader(
-          'Mijozlar',
-          action: TextButton(
-            onPressed: showCustomers,
-            child: const Text('Barchasi'),
-          ),
-        ),
-        Surface(
-          padding: EdgeInsets.zero,
-          child: customers.isEmpty
-              ? EmptyState(
-                  title: 'Birinchi mijozingizni qo‘shing',
-                  message:
-                      'Nasiya va to‘lovlarni mijoz kartasidan boshqarasiz.',
-                  icon: Icons.people_outline,
-                  action: store.canEdit
-                      ? OutlinedButton(
-                          onPressed: () => customerForm(context, store),
-                          child: const Text('Mijoz qo‘shish'),
-                        )
-                      : null,
-                )
-              : Column(
-                  children: [
-                    for (final customer in customers.take(4))
-                      CustomerRow(
-                        customer: customer,
-                        onTap: () =>
-                            openCustomer(context, store, text(customer['id'])),
-                      ),
-                  ],
-                ),
-        ),
-        const SectionHeader('So‘nggi amallar'),
-        Surface(
-          padding: EdgeInsets.zero,
-          child: store.rows('events').isEmpty
-              ? const EmptyState(
-                  title: 'Faoliyat tarixi',
-                  message: 'Kiritilgan amallar avtomatik qayd etiladi.',
-                )
-              : Column(
-                  children: [
-                    for (final item in store.rows('events').take(4))
-                      ActivityRow(
-                        item,
-                        onTap: text(item['customer_id']).isEmpty
-                            ? null
-                            : () => openCustomer(
-                                context,
-                                store,
-                                text(item['customer_id']),
-                              ),
-                      ),
-                  ],
-                ),
-        ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) =>
+      ExecutiveDashboard(store: store, showCustomers: showCustomers);
 }
 
 class TaskRow extends StatelessWidget {
@@ -901,7 +729,7 @@ class TaskRow extends StatelessWidget {
     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
     leading: CircleAvatar(
       backgroundColor: task['kind'] == 'promise'
-          ? const Color(0xFFFFF1DE)
+          ? Palette.warningSoft
           : Palette.soft,
       foregroundColor: task['kind'] == 'promise' ? Palette.amber : Palette.teal,
       child: Icon(
@@ -988,9 +816,7 @@ class NotificationsPage extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: Surface(
-                color: task['read'] == true
-                    ? Colors.white
-                    : const Color(0xFFF0F7F6),
+                color: task['read'] == true ? Palette.surface : Palette.soft,
                 padding: EdgeInsets.zero,
                 child: TaskRow(
                   task: task,

@@ -130,7 +130,7 @@ class VoiceDashboard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Surface(
-                  color: const Color(0xFFFFF7EB),
+                  color: Palette.warningSoft,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

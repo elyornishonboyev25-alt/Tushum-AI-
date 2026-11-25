@@ -59,6 +59,12 @@ APK ishlab chiqish imzosi bilan yig‘ilgan sinov versiyasidir. Mahalliy HTTP ul
 
 Telegram orqali ovozli AI suhbat, jonli suhbat matni va tasdiqlangan kelishuvni saqlash moduli qo‘shilgan. Uning ishlashi uchun serverdagi Telegram sessiyasi, Gemini API kaliti va biznes ulanishi sozlanadi. Batafsil yo‘riqnoma [ovozli agent hujjatida](docs/voice-agent.md). Oddiy telefon tarmog‘i orqali qo‘ng‘iroq va onlayn karta to‘lovi keyingi integratsiyaga tegishli. Kirish telefon va parol bilan bajariladi. To‘lovni xodim qabul qilingan pulga asoslanib kiritadi.
 
+## Boshqaruv paneli
+
+Inter shriftli qorong‘i interfeysda ochiq qarz, faol AI va’dalarining to‘lanmagan qismi va jonli qo‘ng‘iroqlar alohida ko‘rsatiladi. Shu oy sof tushumi to‘lovlardan qaytarimlarni ayirish orqali hisoblanadi. Jadvalda qidiruv, holat filtrlari, summa bo‘yicha saralash va sahifalash bor; kichik ekranda yozuvlar kartalarga aylanadi. Telegram holati va transkript serverdan har 2 soniyada yangilanadi.
+
+**Demo suhbat** brauzer ichidagi simulyatsiyani ochadi: transkript, pauza, davom ettirish va va’da holatini namoyish qiladi. U qo‘ng‘iroq yubormaydi, to‘lov yoki va’da yozuvini saqlamaydi; KPI ish maydoni ma’lumotlarida qoladi. Demo biznesdagi asosiy qo‘ng‘iroq tugmasi ham shu simulyatsiyani ishga tushiradi. Haqiqiy qo‘ng‘iroq uchun Telegram ulanishi, xodim vakolati va mijoz roziligi talab qilinadi. Click / Payme integratsiyasi rejada. Harakatni kamaytirish sozlamasi yoqilganda animatsiyalar to‘xtaydi.
+
 ## Hisob-kitob
 
 - Pul serverda butun tiyin ko‘rinishida saqlanadi. Yozish API so‘rovlarida summa so‘mdagi o‘nlik matn orqali uzatiladi, masalan `"150000.50"`. Javobdagi `amount`, `balance` va `paid` tiyin birligida qaytadi.

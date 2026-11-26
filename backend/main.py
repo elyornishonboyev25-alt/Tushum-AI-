@@ -904,12 +904,14 @@ def import_template(actor: Actor):
                     [
                         "Mijoz ismi",
                         "Telegram username",
-                        "Qarz summasi",
-                        "Qarz sanasi",
+                        "Do‘kon",
+                        "Summa",
+                        "To‘lov muddati",
                     ],
                     [
                         "Akmal Namuna",
                         "@akmal_namuna",
+                        "Baraka Market",
                         1500000,
                         (date.fromisoformat(today()) + timedelta(days=7)).isoformat(),
                     ],

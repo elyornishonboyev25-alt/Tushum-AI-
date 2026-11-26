@@ -29,11 +29,11 @@ class _SpreadsheetImportPageState extends State<SpreadsheetImportPage> {
     'name': 'Mijoz ismi',
     'phone': 'Telefon raqami',
     'telegram_username': 'Telegram username',
-    'amount': 'Nasiya summasi',
+    'amount': 'Summa',
     'due_on': 'To‘lov muddati',
     'issued_on': 'Savdo sanasi',
     'reference': 'Hujjat raqami',
-    'company': 'Korxona',
+    'company': 'Do‘kon',
     'note': 'Izoh',
   };
 
@@ -313,7 +313,7 @@ class _SpreadsheetImportPageState extends State<SpreadsheetImportPage> {
             children: [
               const SizedBox(height: 6),
               Text(
-                '${[if (text(row['telegram_username']).isNotEmpty) '@${row['telegram_username']}', if (text(row['phone']).isNotEmpty) text(row['phone'])].join(' · ')} · ${text(row['amount'])} so‘m\nQaytarish muddati ${displayDate(row['due_on'])}',
+                '${[if (text(row['telegram_username']).isNotEmpty) '@${row['telegram_username']}', if (text(row['phone']).isNotEmpty) text(row['phone'])].join(' · ')} · ${text(row['amount'])} so‘m\n${text(row['company']).isEmpty ? '' : 'Do‘kon: ${row['company']}\n'}To‘lov muddati ${displayDate(row['due_on'])}',
                 style: const TextStyle(
                   color: Palette.muted,
                   fontSize: 12,
@@ -353,7 +353,7 @@ class _SpreadsheetImportPageState extends State<SpreadsheetImportPage> {
           ),
           const SizedBox(height: 12),
           const Text(
-            'Mijoz ismi, Telegram username, qarz summasi va qaytarish muddatini yozing. Yuklagach, saqlashdan oldin tekshirasiz.',
+            'Ism, Telegram username, do‘kon, summa va to‘lov muddati. Quyidagi namunaga qarab faylingizni tayyorlang.',
             style: TextStyle(color: Palette.muted, height: 1.6),
           ),
           const SizedBox(height: 22),

@@ -39,7 +39,15 @@ ALIASES = {
     ],
     "issued_on": ["savdosanasi", "issuedon", "issued", "sana"],
     "reference": ["hujjat", "hujjatraqami", "reference", "invoice", "id"],
-    "company": ["korxona", "company", "biznes"],
+    "company": [
+        "dokon",
+        "dokonnomi",
+        "dukon",
+        "dukonnomi",
+        "korxona",
+        "company",
+        "biznes",
+    ],
     "note": ["izoh", "note", "comment"],
 }
 

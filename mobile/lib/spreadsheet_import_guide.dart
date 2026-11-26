@@ -11,8 +11,9 @@ class SpreadsheetImportGuide extends StatefulWidget {
   static const headers = [
     'Mijoz ismi',
     'Telegram username',
-    'Qarz summasi',
-    'Qarz sanasi',
+    'Do‘kon',
+    'Summa',
+    'To‘lov muddati',
   ];
 
   @override
@@ -25,12 +26,14 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
   static const icons = [
     Icons.person_outline,
     Icons.alternate_email,
+    Icons.storefront_outlined,
     Icons.payments_outlined,
     Icons.event_outlined,
   ];
   static const explanations = [
     'Mijozning ismi va familiyasini yozing. Bir mijozning boshqa qarzida ham shu ismni ishlating.',
     'Mijozning Telegram’dagi username’ini yozing: @ bilan yoki usiz. Ism yoki telefon raqamini bu ustunga yozmang.',
+    'Qarzdor mijozning do‘koni yoki korxonasi nomini yozing. Masalan: Baraka Market.',
     'Qarz summasini so‘mda kiriting. Masalan, 1500000 — bir million besh yuz ming so‘m. «mln» yoki «so‘m» qo‘shmang.',
     'Bu — qarzni qaytarish kerak bo‘lgan sana. YYYY-MM-DD yoki DD.MM.YYYY formatidan foydalaning.',
   ];
@@ -46,6 +49,7 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
     examples = [
       'Akmal Karimov',
       '@akmal_namuna',
+      'Baraka Market',
       '1500000',
       due,
     ].map((value) => TextEditingController(text: value)).toList();
@@ -63,6 +67,10 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
           return '@akmal_namuna kabi yozing: 5–32 ta belgi.';
         }
       case 2:
+        if (value.isEmpty || value.length > 120) {
+          return 'Do‘kon nomini yozing, ko‘pi bilan 120 ta belgi.';
+        }
+      case 3:
         final amount = num.tryParse(
           value.replaceAll(RegExp(r'[ \u00a0]'), '').replaceAll(',', '.'),
         );
@@ -74,7 +82,7 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
                 .hasMatch(value.replaceAll(RegExp(r'[ \u00a0]'), ''))) {
           return 'Musbat son kiriting. Masalan: 1500000 yoki 1500000.50.';
         }
-      case 3:
+      case 4:
         final iso = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(value);
         final local = RegExp(r'^(\d{2})\.(\d{2})\.(\d{4})$').firstMatch(value);
         final match = iso ?? local;
@@ -116,7 +124,7 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
   }) {
     final active = selected == column;
     return SizedBox(
-      width: [205.0, 225.0, 180.0, 190.0][column] * scale,
+      width: [200.0, 225.0, 205.0, 170.0, 200.0][column] * scale,
       child: Material(
         color: active ? Palette.soft : Colors.transparent,
         child: InkWell(
@@ -144,7 +152,7 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
     final failure = validateExample();
     return LayoutBuilder(
       builder: (context, constraints) {
-        final tableScale = ((constraints.maxWidth - 42) / 800)
+        final tableScale = ((constraints.maxWidth - 42) / 1000)
             .clamp(1.0, 2.0)
             .toDouble();
         return Surface(
@@ -159,7 +167,7 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
                 runSpacing: 6,
                 children: [
                   const Text(
-                    'Excel faylida 4 ta ustun bo‘lsin',
+                    'Excel faylini shunday tayyorlang',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
                   ),
                   TextButton.icon(
@@ -183,7 +191,7 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
               ),
               const SizedBox(height: 5),
               const Text(
-                'Ustunni bosing, so‘ng namunani o‘zgartirib formatini sinang. Har bir qator — bitta qarz.',
+                'Atigi 5 ta ustun. Birinchi qatorga ustun nomlarini, keyingi qatorlarga mijozlarni yozing. Ustunni bosib namunasini sinang.',
                 style: TextStyle(color: Palette.muted, height: 1.6),
               ),
               const SizedBox(height: 18),
@@ -224,7 +232,11 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
                       children: [
                         Row(
                           children: [
-                            for (var i = 0; i < 4; i++)
+                            for (
+                              var i = 0;
+                              i < SpreadsheetImportGuide.headers.length;
+                              i++
+                            )
                               exampleCell(
                                 SpreadsheetImportGuide.headers[i],
                                 i,
@@ -234,12 +246,16 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
                           ],
                         ),
                         SizedBox(
-                          width: 800 * tableScale,
+                          width: 1000 * tableScale,
                           child: const Divider(),
                         ),
                         Row(
                           children: [
-                            for (var i = 0; i < 4; i++)
+                            for (
+                              var i = 0;
+                              i < SpreadsheetImportGuide.headers.length;
+                              i++
+                            )
                               exampleCell(
                                 examples[i].text,
                                 i,
@@ -248,18 +264,23 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
                           ],
                         ),
                         SizedBox(
-                          width: 800 * tableScale,
+                          width: 1000 * tableScale,
                           child: const Divider(),
                         ),
                         Row(
                           children: [
-                            for (var i = 0; i < 4; i++)
+                            for (
+                              var i = 0;
+                              i < SpreadsheetImportGuide.headers.length;
+                              i++
+                            )
                               exampleCell(
                                 [
                                   'Nodira Aliyeva',
                                   '@nodira_namuna',
+                                  'Nodira Savdo',
                                   '850000',
-                                  examples[3].text,
+                                  examples[4].text,
                                 ][i],
                                 i,
                                 scale: tableScale,
@@ -286,7 +307,7 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
                 key: ValueKey('import-example-$selected'),
                 controller: examples[selected],
                 onChanged: (_) => setState(() {}),
-                maxLength: selected == 0 ? 120 : 40,
+                maxLength: selected == 0 || selected == 2 ? 120 : 40,
                 decoration: InputDecoration(
                   labelText:
                       '${SpreadsheetImportGuide.headers[selected]} — namuna',
@@ -306,30 +327,13 @@ class _SpreadsheetImportGuideState extends State<SpreadsheetImportGuide> {
                 ),
               ),
               const SizedBox(height: 14),
-              const ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                title: Text(
-                  'Telefon va qo‘shimcha ustunlar',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              const Text(
+                'Bir mijozning bir nechta qarzi bo‘lsa, har birini alohida qatorda bir xil username bilan yozing.',
+                style: TextStyle(
+                  color: Palette.muted,
+                  fontSize: 12,
+                  height: 1.6,
                 ),
-                children: [
-                  Padding(
-                    padding: EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      'Telegram username o‘rniga «Telefon» ustunini ishlatish ham mumkin: +998901234567. '
-                      'Ikkalasini ham kiritsangiz, bir mijozga tegishli bo‘lsin.\n\n'
-                      '«Savdo sanasi» — qarz berilgan sana. Bo‘sh qolsa, bugungi sana olinadi. '
-                      'Oldin berilgan qarzlar uchun shu ustunni ham kiriting. Qaytarish muddati savdo sanasidan oldin bo‘lmasin.\n\n'
-                      '«Hujjat», «Korxona» va «Izoh» ixtiyoriy. Hujjat raqami takrorlanmasin. '
-                      'Bitta mijozning bir nechta qarzi bo‘lsa, alohida qatorlarda bir xil username yoki telefonni yozing.',
-                      style: TextStyle(
-                        color: Palette.muted,
-                        fontSize: 13,
-                        height: 1.7,
-                      ),
-                    ),
-                  ),
-                ],
               ),
             ],
           ),

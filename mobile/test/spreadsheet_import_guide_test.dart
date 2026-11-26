@@ -22,7 +22,7 @@ void main() {
     tester,
   ) async {
     await openGuide(tester);
-    await tester.tap(find.widgetWithText(ChoiceChip, 'Qarz summasi'));
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Summa'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '1.5 mln');
     await tester.pump();
@@ -53,9 +53,11 @@ void main() {
       findsOneWidget,
     );
     tester.testTextInput.hide();
-    await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'Qarz sanasi'));
+    await tester.ensureVisible(
+      find.widgetWithText(ChoiceChip, 'To‘lov muddati'),
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ChoiceChip, 'Qarz sanasi'));
+    await tester.tap(find.widgetWithText(ChoiceChip, 'To‘lov muddati'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '2026-02-31');
     await tester.pump();
@@ -69,6 +71,19 @@ void main() {
       find.text('Mavjud sanani kiriting. Oy va kunni tekshiring.'),
       findsNothing,
     );
+  });
+
+  testWidgets('Shop example is editable independently of the other customer', (
+    tester,
+  ) async {
+    await openGuide(tester);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Do‘kon'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Yangi Market');
+    await tester.pump();
+    expect(find.text('Yangi Market'), findsWidgets);
+    expect(find.text('Nodira Savdo'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Guide fits a narrow phone with horizontal table scrolling', (

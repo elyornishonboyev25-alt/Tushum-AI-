@@ -232,7 +232,7 @@ class ImportContactTests(unittest.TestCase):
         book = load_workbook(BytesIO(response.content))
         self.assertEqual(
             next(iter(book.active.values)),
-            ("Mijoz ismi", "Telegram username", "Qarz summasi", "Qarz sanasi"),
+            ("Mijoz ismi", "Telegram username", "Do‘kon", "Summa", "To‘lov muddati"),
         )
         uploaded = self.client.post(
             "/api/imports/preview",
@@ -242,6 +242,10 @@ class ImportContactTests(unittest.TestCase):
         self.assertEqual(uploaded.status_code, 200, uploaded.text)
         self.assertFalse(uploaded.json()["needs_mapping"])
         self.assertFalse(uploaded.json()["rows"][0]["error"])
+        self.assertEqual(uploaded.json()["rows"][0]["company"], "Baraka Market")
+        saved = self.commit(uploaded.json())
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(self.workspace()["customers"][0]["company"], "Baraka Market")
 
 
 if __name__ == "__main__":

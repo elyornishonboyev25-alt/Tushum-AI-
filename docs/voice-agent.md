@@ -18,32 +18,17 @@ Yangi mijoz va nasiya faqat qo‘ng‘iroqni boshlash tasdiqlanganda bitta tranz
 
 Shu username orqali qayta qo‘ng‘iroq qilinganda bitta ochiq nasiyaning aynan joriy qoldig‘i ishlatiladi. Ism yoki summa mos kelmasa, bir nechta ochiq nasiya bo‘lsa yoxud qarz yopilgan bo‘lsa, foydalanuvchiga mavjud yozuvni tanlash tavsiya qilinadi. Qarzni takror qo‘shish yoki yashirin o‘zgartirish bajarilmaydi.
 
-## Suhbat sifati
+## Jonli ovozli suhbat
 
-AI **faqat tabiiy o‘zbek tilida** javob beradi; ruscha va aralash nutqni tushunishi saqlanadi. `speech_config.language_code=uz-UZ` va versiyalangan siyosat birgalikda ishlaydi. Mijoz ruscha javob so‘rasa ham o‘zbekcha javob qaytariladi. Lotincha o‘zbek tilida javob beriladi, kirillcha ism va korxona nomi lotincha aytiladi. Ovoz `Kore`, suhbat modeli `gemini-3.8-live`.
+Mijoz mikrofoni **to‘g‘ridan-to‘g‘ri `gemini-3.8-live`** modeliga 16 kHz PCM sifatida uzatiladi. AI audioni o‘zi eshitadi va tabiiy ovozli javob beradi. Suhbat yo‘lida alohida STT, ikkinchi eshituvchi, natijalarni solishtirish, so‘zlardan qayta audio yaratish yoki butun javobni kutib turish yo‘q. Javob audiosi kelishi bilan 24 kHz dan 48 kHz Telegram ovoziga aylantirilib ijro qilinadi.
 
-Javobning butun matni tekshirilmaguncha audio ijroga berilmaydi. Kirillcha yoki aniqlangan ruscha javob tashlab yuboriladi va bir marta o‘zbekcha qayta javob so‘raladi; yana xato bo‘lsa `voice_language` bilan suhbat to‘xtaydi. Bu skript/ibora tekshiruvi talaffuzning yoki barcha tillarning matematik isboti emas. Javobni to‘liq tekshirish nutq boshlanishiga qo‘shimcha kutish qo‘shadi.
+`uz-UZ` ovoz sozlamasi va agent siyosati javoblarni o‘zbekcha qiladi. AI ruscha va aralash nutqni ham eshitadi, javobni o‘zbekcha beradi. Ovoz `Kore`. Odam gapga aralashsa, modelning interruption hodisasi oldingi ijro buferini tozalaydi. Audio diskka saqlanmaydi.
 
-24 kHz PCM soxr HQ orqali filtr holatini saqlab, 48 kHz Telegram PCM ga aylantiriladi. Bo‘lingan 16-bit namunalar va filtr oxiri saqlanadi; 60 ms ijro buferi tarmoqdagi qisqa tebranishlarni yumshatadi. Mijoz gapirsa, oldingi javob va ijro buferi tozalanadi. Kirish oqimi to‘lsa, so‘zlarni jimgina tashlash o‘rniga suhbat xatolik bilan to‘xtaydi.
+Telegram sukut vaqtida paket bermasa, 900 ms audio kelmaganidan keyin bir marta `audio_stream_end` yuboriladi. Bu haqiqiy audioning tugaganini bildiradi; sun’iy mikrofon paketi yoki mijoz nomidan matnli gap yuborilmaydi. Modelning ichki subtitrlari hisob vositalari va suhbat tarixiga yordam beradi, ammo javob berish uchun ular kutilmaydi va alohida transkripsiya xizmatiga uzatilmaydi. Vaqtinchalik mijoz matni saqlanmaydi.
 
-### Mijoz nutqi va AI javobi alohida
+Moliyaviy yozuvlar hali ham alohida server tekshiruvlaridan o‘tadi: aniq summa va sana, ovozli qayta o‘qish, undan keyingi yangi aniq tasdiq kerak. To‘lov qilganini aytishning o‘zi pul tushumini yaratmaydi. Manfiy/shartli javob yoki e’tiroz tasdiq hisoblanmaydi. Model va uning ichki subtitrlari xato qilishi mumkin; xatosizlik kafolati berilmaydi.
 
-Mijozning 16 kHz PCM oqimidan **Silero VAD ONNX** odam nutqini aniqlaydi. Model CPU da ishlaydi; GPU, PyTorch va yangi provayder kerak emas. Har bir suhbatning holati alohida. 320 ms boshlang‘ich kontekst va 1.28 soniyalik pauza chegarasi gapdagi tabiiy to‘xtashlar, sonning davomi va tuzatishni birga eshitishga yordam beradi. Shovqin/sukutning o‘zi transkripsiya so‘rovini boshlamaydi. Bir gap uchun ko‘pi bilan 30 soniya audio xotirada turadi; diskka yozilmaydi. Juda uzun gapning oxirgi bo‘lagi alohida kelishuv deb qabul qilinmaydi.
-
-To‘liq gap quyidagi ikki alohida tanish oqimida tekshiriladi:
-
-- `gemini-3.5-transcribe-live`: `VERBATIM`, `uz-UZ` va `ru-RU` til ko‘rsatmalari, qo‘lda belgilanadigan gap boshi/oxiri. Hisobdagi summa, ism, suhbat AI javoblari va kutilayotgan matn unga berilmaydi.
-- Alohida `gemini-3.8-live` eshituvchi sessiyasi: **faqat input transkripsiyasi** o‘qiladi. Uning javob matni va audiosi mijoz nutqiga yoki ijroga hech qachon qo‘shilmaydi. Bu sessiyaga hisob va suhbat agenti yo‘riqnomasi berilmaydi.
-
-Sonlar, inkor, shartlilik, tanilgan sana/vaqt belgisi yoki matn sezilarli farq qilsa, ayni audio `uz-UZ` ko‘rsatmasi bilan qayta taniladi. Ikkita natija yetarlicha mos kelmasa, yakuniy matn saqlanmaydi va qayta aytish so‘raladi. Bu moslik tekshiruvi ishonch foizi emas: ikki model bir xil xato qilishi mumkin. So‘zlar yozilishida farq bo‘lsa ham o‘sha audio qayta tanilib, qo‘shimcha natija ikkinchi eshituvchiga yaqinroq bo‘lsa tanlanadi; tayyor matn qo‘lda yoki chat modeli bilan tuzatilmaydi. Imlo uchun qo‘shimcha urinish to‘rt soniya bilan cheklanadi va uning uzilishi allaqachon ikki eshituvchi tekshirgan natijani bekor qilmaydi. Qo‘shimcha o‘zbekcha tanish ulanishi kerak bo‘lganda ochilib, keyin suhbat davomida saqlanadi. Bekor qilingan gapning kechikkan natijasi keyingi gapga biriktirilmaydi. Tanish tugamasdan odam gapini davom ettirsa, oldingi matn bekor qilinib, ikkala bo‘lak birga qayta eshitiladi.
-
-Faqat tekshirilgan yakuniy matn suhbat agentiga beriladi. Vaqtinchalik so‘zlar, AI aytgan “Tushundim” yoki sukut mijoz nutqi sifatida yozilmaydi. Summa kiritish vositasi taklifdagi raqamni mijoz aytgan raqamlarga ham solishtiradi; mijoz aniq “yarmini/hammasini” deganda tegishli ulush ishlatilishi mumkin. Har kelishuv hali ovozli qayta o‘qish va yangi aniq tasdiqdan o‘tadi. To‘lov aytilgani hisobdagi pulni o‘zgartirmaydi.
-
-`voice_transcript.source` yangi yozuvlarda `dedicated_stt_verbatim` yoki `agent_output`. Eski yozuvlar `legacy` bo‘lib qoladi, qayta yozilmaydi. Yangi manba belgisi eski xatolarni orqadan to‘g‘rilagandek ko‘rsatmaydi.
-
-Qo‘ng‘iroqdan oldin VAD va tanish ulanishlari ochiladi. Ulanish uzilsa ayni audio yangi ulanishda bir marta qayta taniladi. Natija baribir olinmasa `stt_unavailable`, kvota tugasa qayta ulanmasdan `ai_quota` qayd etiladi; tasdiqlanmagan natija bilan davom etilmaydi. Tanish va til qayta ishlanayotganida moliyaviy vositalar bloklanadi. Tanish ulanishlari va qo‘shimcha eshituvchining provayder xarajati/kvotasi bor. Qisqa qo‘ng‘iroqda ham qo‘shimcha vaqt va xarajatni amalda kuzatish kerak.
-
-Bu o‘zgarish model vaznlarini o‘qitish emas. Sintetik audio, shovqin, sukut, inkor, tuzatish va aralash til bilan regressiya tekshiriladi. Haqiqiy shevalar, past ovoz, tarmoq siqilishi va shovqinda xato yoki qayta aytish talabi qolishi mumkin; 100% aniqlik kafolati berilmaydi. `scripts/evaluate_voice_roundtrip.py` haqiqiy tanish, suhbat, til tekshiruvi, ijro va hisob vositalarini izolyatsiyalangan bazada ishlatadi; faqat Telegram transporti simulyatsiya qilinadi. Hech kimga qo‘ng‘iroq qilinmaydi.
+`scripts/evaluate_voice_roundtrip.py` modelning haqiqiy kirish/chiqish audiosini va ilovaning jonli suhbat oqimini izolyatsiyalangan bazada tekshiradi. Faqat Telegram transporti simulyatsiya qilinadi; haqiqiy foydalanuvchiga qo‘ng‘iroq qilinmaydi. Sinovda sukut paketlari yuborilmasligi ham tekshiriladi.
 
 ## Railway sozlamalari
 

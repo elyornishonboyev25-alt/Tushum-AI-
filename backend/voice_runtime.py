@@ -8,14 +8,13 @@ import json
 import logging
 import os
 import time
-from contextlib import AsyncExitStack, suppress
+from contextlib import suppress
 from pathlib import Path
 
 from . import database, voice
 from .voice_audio import SpeechOutput
 from .voice_policy import TOOLS, instructions
-from .voice_reply import ReplyAudio
-from .voice_stt import STT_SOURCE, RecognitionError, open_recognition
+from .voice_transcription import CustomerTranscription
 from .voice_turns import ClosingGate, OpeningGate
 
 log = logging.getLogger(__name__)
@@ -62,6 +61,9 @@ def live_config(context, model="gemini-3.8-live", *, voice_name=None):
                     "voice_name": voice_name or os.getenv("TUSHUM_VOICE_NAME", "Kore")
                 }
             },
+        },
+        "input_audio_transcription": {
+            "language_codes": ["uz-UZ", "ru-RU"],
         },
         "output_audio_transcription": {},
         "tools": tools,
@@ -255,16 +257,11 @@ class VoiceRuntime:
             "turn": 0,
             "first_audio": False,
             "finish_at": None,
-            "user_speaking": False,
-            "speech_started_at": None,
-            "recognition_pending": False,
-            "language_pending": False,
-            "language_retries": 0,
         }
-        reply_audio = ReplyAudio()
         tasks = []
         opening = OpeningGate()
         closing = ClosingGate()
+        customer_transcription = CustomerTranscription()
         ai = genai.Client(
             api_key=config["api_key"], http_options={"api_version": "v1beta"}
         )
@@ -282,18 +279,10 @@ class VoiceRuntime:
             if not resolved_target_matches(peer, call["target"]) or not permitted:
                 raise ValueError("target_mismatch")
             self.active_peer = peer.id
-            async with AsyncExitStack() as stack:
-                # Establish isolated recognition BEFORE dialling. A failed STT
-                # connection must not fall back to the chat model guessing words.
-                recognizer = await stack.enter_async_context(open_recognition(ai))
-                live = await stack.enter_async_context(
-                    ai.aio.live.connect(
-                        model=config["model"],
-                        config=live_config(
-                            json.loads(call["context_json"]), config["model"]
-                        ),
-                    )
-                )
+            async with ai.aio.live.connect(
+                model=config["model"],
+                config=live_config(json.loads(call["context_json"]), config["model"]),
+            ) as live:
                 dial = asyncio.create_task(
                     self.calls.play(
                         peer.id,
@@ -338,16 +327,8 @@ class VoiceRuntime:
                     if who == "user":
                         # Output audio/tool messages do not make an interim user
                         # hypothesis final. Input and output arrive independently.
-                        return True
+                        return
                     content = state[who]
-                    if not content and not reply_audio.size:
-                        return not state["language_pending"]
-                    chunks = reply_audio.release(content)
-                    if not chunks:
-                        state[who] = ""
-                        state["language_pending"] = True
-                        state["language_retries"] += 1
-                        return False
                     if content:
                         voice.transcript(
                             call_id,
@@ -359,56 +340,28 @@ class VoiceRuntime:
                         )
                         state[who] = ""
                         state[who + "_index"] += 1
-                    state["language_pending"] = False
-                    state["language_retries"] = 0
-                    if chunks:
-                        closing.output()
-                        for data, mime_type in chunks:
-                            self.output.write(data, mime_type)
-                        self.output.finish()
-                    return True
 
                 async def send_input():
+                    audio_open = False
                     while True:
-                        data = await self.incoming.get()
+                        try:
+                            data = await asyncio.wait_for(self.incoming.get(), 0.9)
+                        except TimeoutError:
+                            if audio_open:
+                                # Telegram can omit silence frames (DTX). End
+                                # that real audio segment, without inventing PCM
+                                # or sending a text turn to trigger the reply.
+                                await live.send_realtime_input(audio_stream_end=True)
+                                audio_open = False
+                            continue
                         if self.input_overflow:
                             raise RuntimeError("audio_input_overflow")
-                        await recognizer.send(data)
-
-                async def receive_speech():
-                    utterance = 0
-                    async for speech in recognizer.receive():
-                        opening.recipient_answered = True
-                        if not speech.final:
-                            if not state["user_speaking"]:
-                                self.output.reset()
-                                reply_audio.reset()
-                                state["ai"] = ""
-                                state["user_speaking"] = True
-                                state["speech_started_at"] = time.monotonic()
-                            state["recognition_pending"] = True
-                            # Speculative words are never written to the ledger
-                            # or shown as a customer's settled transcript.
-                            continue
-                        voice.transcript(
-                            call_id,
-                            f"stt-{utterance}",
-                            "customer",
-                            speech.text,
-                            True,
-                            source=STT_SOURCE,
+                        await live.send_realtime_input(
+                            audio=types.Blob(
+                                data=data, mime_type="audio/pcm;rate=16000"
+                            )
                         )
-                        utterance += 1
-                        if stop.is_set() or finish.is_set():
-                            continue
-                        self.output.reset()
-                        state["user_speaking"] = False
-                        state["recognition_pending"] = False
-                        state["speech_started_at"] = None
-                        await live.send_client_content(
-                            turns={"role": "user", "parts": [{"text": speech.text}]},
-                            turn_complete=True,
-                        )
+                        audio_open = True
 
                 async def play_output():
                     next_tick = time.monotonic()
@@ -435,51 +388,69 @@ class VoiceRuntime:
                             if content:
                                 if content.interrupted:
                                     self.output.reset()
-                                    reply_audio.reset()
-                                    state["ai"] = ""
+                                    flush("ai")
                                     state["turn"] += 1
-                                # This session generates agent replies only. Neither its
-                                # input subtitles nor model text may become caller speech.
+                                if (
+                                    content.interim_input_transcription
+                                    and content.interim_input_transcription.text
+                                ):
+                                    opening.recipient_answered = True
+                                    index, words, final = (
+                                        customer_transcription.preview(
+                                            content.interim_input_transcription.text
+                                        )
+                                    )
+                                    # Internal provisional captions never drive the live audio.
+
+                                if (
+                                    content.input_transcription
+                                    and content.input_transcription.text
+                                ):
+                                    opening.recipient_answered = True
+                                    index, words, final = customer_transcription.accept(
+                                        content.input_transcription.text,
+                                        content.input_transcription.finished,
+                                    )
+                                    if final:
+                                        voice.transcript(
+                                            call_id,
+                                            f"user-{index}",
+                                            "customer",
+                                            words,
+                                            final,
+                                        )
                                 if (
                                     content.output_transcription
                                     and content.output_transcription.text
-                                    and not state["user_speaking"]
                                 ):
                                     flush("user")
                                     state["ai"] += content.output_transcription.text
+                                    voice.transcript(
+                                        call_id,
+                                        f"ai-{state['ai_index']}",
+                                        "ai",
+                                        state["ai"],
+                                    )
                                 if content.model_turn:
                                     flush("user")
                                     for part in content.model_turn.parts or []:
-                                        if (
-                                            part.inline_data
-                                            and part.inline_data.data
-                                            and not state["user_speaking"]
-                                        ):
-                                            reply_audio.write(
+                                        if part.inline_data and part.inline_data.data:
+                                            closing.output()
+                                            self.output.write(
                                                 part.inline_data.data,
                                                 part.inline_data.mime_type
                                                 or "audio/pcm;rate=24000",
                                             )
+                                if content.generation_complete:
+                                    # Audio generation can finish before the full
+                                    # interaction: release the final filter samples now.
+                                    self.output.finish()
                                 if content.turn_complete:
                                     flush("user")
-                                    valid = flush("ai")
-                                    if not valid:
-                                        if state["language_retries"] >= 2:
-                                            raise RuntimeError("voice_language")
-                                        await live.send_client_content(
-                                            turns={
-                                                "role": "user",
-                                                "parts": [
-                                                    {
-                                                        "text": "SERVER_NOTICE: Oxirgi javob ijro etilmadi. Uni faqat lotin yozuvidagi tabiiy o‘zbekcha gap bilan qaytaring. Ruscha so‘z yoki jumla aytmang. Bu mijoz gapi emas."
-                                                    }
-                                                ],
-                                            },
-                                            turn_complete=True,
-                                        )
+                                    flush("ai")
+                                    self.output.finish()
                                     state["turn"] += 1
-                                    if valid:
-                                        opening.greeting_complete = True
+                                    opening.greeting_complete = True
                                     if closing.requested_at is not None:
                                         closing.turn_complete = True
                             if message.tool_call:
@@ -487,27 +458,8 @@ class VoiceRuntime:
                                 flush("ai")
                                 responses = []
                                 for tool in message.tool_call.function_calls:
-                                    result = (
-                                        {
-                                            "error": "Suhbat yakunlangan. Yangi kelishuv saqlanmaydi."
-                                        }
-                                        if stop.is_set()
-                                        else {
-                                            "error": "Javob ijro etilmadi. Avval faqat tabiiy o‘zbek tilida javob bering."
-                                        }
-                                        if state["language_pending"]
-                                        else {
-                                            "error": "Mijoz hali gapirmoqda. Yakuniy javobni kuting; taxmin qilmang."
-                                        }
-                                        if state["recognition_pending"]
-                                        and not (
-                                            tool.name == "finish_call"
-                                            and (tool.args or {}).get("outcome")
-                                            in ("human_requested", "no_agreement")
-                                        )
-                                        else voice.execute_tool(
-                                            call_id, tool.name, dict(tool.args or {})
-                                        )
+                                    result = voice.execute_tool(
+                                        call_id, tool.name, dict(tool.args or {})
                                     )
                                     responses.append(
                                         types.FunctionResponse(
@@ -556,27 +508,6 @@ class VoiceRuntime:
                             voice.change_status(call_id, "cancelled")
                             stop.set()
                             return
-                        if recognizer.repair_due() and not finish.is_set():
-                            state["user_speaking"] = False
-                            state["speech_started_at"] = None
-                            state["recognition_pending"] = True
-                            self.output.reset()
-                            await live.send_client_content(
-                                turns={
-                                    "role": "user",
-                                    "parts": [
-                                        {
-                                            "text": "SERVER_NOTICE: Mijoz ovozidan ishonchli yakuniy matn olinmadi. Faqat oxirgi gapni qaytarishni muloyim so‘rang. Hech qanday summa, sana yoki tasdiqni taxmin qilmang. Bu mijoz gapi emas."
-                                        }
-                                    ],
-                                },
-                                turn_complete=True,
-                            )
-                        if (
-                            state["speech_started_at"] is not None
-                            and time.monotonic() - state["speech_started_at"] > 55
-                        ):
-                            raise RecognitionError("stt_unavailable")
                         drained = self.output.drained
                         if closing.ready(time.monotonic(), drained):
                             stop.set()
@@ -605,13 +536,7 @@ class VoiceRuntime:
 
                 tasks = [
                     asyncio.create_task(f())
-                    for f in (
-                        send_input,
-                        receive_speech,
-                        play_output,
-                        receive_model,
-                        monitor,
-                    )
+                    for f in (send_input, play_output, receive_model, monitor)
                 ]
                 tasks.append(asyncio.create_task(stop.wait()))
                 await live.send_client_content(
@@ -629,12 +554,8 @@ class VoiceRuntime:
                 for task in done:
                     if not task.cancelled() and task.exception():
                         raise task.exception()
-                stop.set()
-                await recognizer.finish()
-                # A hangup must not promote an unfinished/unplayed reply to a
-                # completed AI utterance after the other party has left.
-                reply_audio.reset()
-                state["ai"] = ""
+                flush("user")
+                flush("ai")
                 voice.change_status(call_id, "completed")
         except asyncio.CancelledError:
             voice.change_status(call_id, "failed", error_code="server_stopped")
@@ -646,9 +567,7 @@ class VoiceRuntime:
                 if name in ("TimedOutAnswer", "CallDeclined", "CallDiscarded")
                 else "connection_failed"
             )
-            if isinstance(exc, RecognitionError):
-                code = "ai_quota" if str(exc) == "ai_quota" else "stt_unavailable"
-            elif "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc):
+            if "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc):
                 code = "ai_quota"
             elif "403" in str(exc) or "401" in str(exc):
                 code = "ai_access"
@@ -673,8 +592,6 @@ class VoiceRuntime:
                 "incomplete_pcm_sample",
             ):
                 code = "audio_quality"
-            elif str(exc) == "voice_language":
-                code = "voice_language"
             voice.change_status(
                 call_id,
                 "no_answer" if code == "no_answer" else "failed",
@@ -689,7 +606,6 @@ class VoiceRuntime:
                 with suppress(Exception):
                     await self.calls.leave_call(self.active_peer)
             self.active_peer = None
-            reply_audio.reset()
             await ai.aio.aclose()
 
 

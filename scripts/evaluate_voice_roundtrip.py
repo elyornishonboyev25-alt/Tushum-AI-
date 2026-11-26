@@ -192,8 +192,8 @@ async def run(args):
             async def feed():
                 await recorded.wait()
                 while True:
-                    frame = source.get_nowait() if not source.empty() else bytes(2560)
-                    await runtime.incoming.put(frame)
+                    if not source.empty():
+                        await runtime.incoming.put(source.get_nowait())
                     await asyncio.sleep(0.08)
 
             async def wait_reply(previous, require_proposal=False):

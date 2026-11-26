@@ -152,6 +152,26 @@ class VoiceTests(unittest.TestCase):
         )
         self.assertIn("proposal_id", correct)
 
+    def test_native_captions_with_cyrillic_uzbek_amount_can_propose(self):
+        call = self.start()
+        voice.change_status(call, "connected")
+        voice.transcript(
+            call, "offer", "customer", "Беш юз минг сўмни бугун тўлайман.", True
+        )
+        result = voice.execute_tool(
+            call, "propose_promise", {"amount": "500000", "due_on": today()}
+        )
+        self.assertIn("proposal_id", result)
+
+    def test_native_captions_with_cyrillic_half_balance_can_propose(self):
+        call = self.start()
+        voice.change_status(call, "connected")
+        voice.transcript(call, "offer", "customer", "Ярмини бугун тўлайман.", True)
+        result = voice.execute_tool(
+            call, "propose_promise", {"amount": "500000", "due_on": today()}
+        )
+        self.assertIn("proposal_id", result)
+
     def test_corrected_amount_cannot_be_replaced_with_the_rejected_number(self):
         call = self.start()
         voice.change_status(call, "connected")
@@ -852,17 +872,14 @@ class VoiceTests(unittest.TestCase):
 
     def test_bilingual_recognition_and_turn_policy(self):
         from .voice_runtime import live_config
-        from .voice_stt import transcription_config
 
         config = live_config({"business": "Baraka", "customer": "Ali"})
         self.assertEqual(
-            transcription_config()["input_audio_transcription"]["language_codes"],
+            config["input_audio_transcription"]["language_codes"],
             ["uz-UZ", "ru-RU"],
         )
-        self.assertNotIn("input_audio_transcription", config)
-        self.assertEqual(
-            transcription_config()["input_audio_transcription"]["mode"], "VERBATIM"
-        )
+        self.assertNotIn("custom_vocabulary", config["input_audio_transcription"])
+        self.assertIn("LIVE AUDIO CONVERSATION", config["system_instruction"])
         self.assertEqual(config["speech_config"]["language_code"], "uz-UZ")
         self.assertIn("ALWAYS answer", config["system_instruction"])
         self.assertNotIn("switch to natural Russian", config["system_instruction"])

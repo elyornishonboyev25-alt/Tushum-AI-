@@ -30,7 +30,6 @@ from .domain import (
 from .security import current_user
 from .voice_evidence import explicit_payment_values
 from .voice_policy import POLICY_VERSION
-from .voice_stt import STT_MODEL
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 Actor = Annotated[dict, Depends(current_user)]
@@ -355,10 +354,8 @@ def context_for(c, actor, debt):
         "available_promise_som": f"{max(0, remaining - reserved) / 100:.2f}",
         "existing_promises_som": f"{reserved / 100:.2f}",
         "currency": "UZS",
-        "transcription_model": STT_MODEL,
-        "transcription_mode": "VERBATIM",
         "reply_language": "uz-UZ",
-        "recognition_review": "independent_audio_listener",
+        "voice_mode": "native_audio_to_audio",
     }
 
 

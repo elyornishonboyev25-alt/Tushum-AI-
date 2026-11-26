@@ -164,6 +164,8 @@ def number_values(text):
     group = Decimal(0)
     active = False
     for word in tokens(text) + [""]:
+        if word not in NUMBER_WORDS and word not in SCALES:
+            word = latinized(word)
         # Spoken Uzbek dates/counts may carry a grammatical ending. Only remove
         # an ending when the remainder is an actual number, never from names.
         if word not in NUMBER_WORDS and word not in SCALES:
@@ -208,8 +210,8 @@ def number_values(text):
 def explicit_payment_values(text, balance):
     """Conservative proposal check; never multiplies an ambiguous 'ikki yuz'."""
     words = normalized(text)
-    if re.search(r"\bemas\b", words):
-        words = re.split(r"\bemas\b", words)[-1]
+    if re.search(r"\b(?:emas|эмас)\b", words):
+        words = re.split(r"\b(?:emas|эмас)\b", words)[-1]
     elif re.search(r"\bне\b.*[,;]\s*а\b", words):
         words = re.split(r"[,;]\s*а\b", words)[-1]
     currency = bool(re.search(r"\b(som|сум|сумов|сўм)\b", words))
@@ -218,9 +220,13 @@ def explicit_payment_values(text, balance):
         for value in number_values(words)
         if value >= 1000 or currency and value > 0
     }
-    if re.search(r"\b(yarmini|yarmi|половину|половина)\b", words):
+    if re.search(
+        r"\b(yarmini|yarmi|половину|половина)\b", words + " " + latinized(words)
+    ):
         values.add(Decimal(balance) / 2)
-    if re.search(r"\b(hammasini|hammasi|toliq|полностью|всю)\b", words):
+    if re.search(
+        r"\b(hammasini|hammasi|toliq|полностью|всю)\b", words + " " + latinized(words)
+    ):
         values.add(Decimal(balance))
     return values
 

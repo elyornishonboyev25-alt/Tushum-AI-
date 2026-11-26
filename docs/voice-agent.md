@@ -24,6 +24,8 @@ Mijoz mikrofoni **to‘g‘ridan-to‘g‘ri `gemini-3.8-live`** modeliga 16 kHz
 
 `uz-UZ` ovoz sozlamasi va agent siyosati javoblarni o‘zbekcha qiladi. AI ruscha va aralash nutqni ham eshitadi, javobni o‘zbekcha beradi. Ovoz `Kore`. Odam gapga aralashsa, modelning interruption hodisasi oldingi ijro buferini tozalaydi. Audio diskka saqlanmaydi.
 
+Ovoz 180 ms boshlang‘ich bufer bilan ijro qilinadi. Oqim vaqtincha yetishmasa, qayta boshlash buferi bosqichma-bosqich 400 ms gacha oshadi; kichik paket kelishi bilanoq qayta-qayta boshlashdan saqlaydi. Tugagan qisqa javob ushbu chegarani kutmaydi. PCM namunalari, balandligi va ohangi o‘zgartirilmaydi; soxr HQ orqali 24 kHz dan 48 kHz ga aylantirish saqlanadi. Tarmoq kechikishidagi 10 soniyalik sun’iy audio taqqoslashida avvalgi 60 ms bufer 2 marta bo‘shagan, 180 ms bufer bo‘shamagan; ikkala holatda ham barcha 1000 audio kadr saqlangan. Bu haqiqiy telefon tarmog‘idagi uzilishsizlik kafolati emas.
+
 Telegram sukut vaqtida paket bermasa, 900 ms audio kelmaganidan keyin bir marta `audio_stream_end` yuboriladi. Bu haqiqiy audioning tugaganini bildiradi; sun’iy mikrofon paketi yoki mijoz nomidan matnli gap yuborilmaydi. Modelning ichki subtitrlari hisob vositalari va suhbat tarixiga yordam beradi, ammo javob berish uchun ular kutilmaydi va alohida transkripsiya xizmatiga uzatilmaydi. Vaqtinchalik mijoz matni saqlanmaydi.
 
 Moliyaviy yozuvlar hali ham alohida server tekshiruvlaridan o‘tadi: aniq summa va sana, ovozli qayta o‘qish, undan keyingi yangi aniq tasdiq kerak. To‘lov qilganini aytishning o‘zi pul tushumini yaratmaydi. Manfiy/shartli javob yoki e’tiroz tasdiq hisoblanmaydi. Model va uning ichki subtitrlari xato qilishi mumkin; xatosizlik kafolati berilmaydi.
@@ -39,6 +41,8 @@ Vositalar `error_code`, `recoverable` va kerak bo‘lsa `ask_customer` qaytaradi
 Modelning ichki subtitri va moliyaviy vositasi turli tartibda kelishi mumkin. Alohida vosita navbati audioni qabul qilishni bloklamaydi; faqat dalil yetishmagan xatoda yangi yakuniy subtitrni 650 ms gacha kutib, tekshiruvni bir marta takrorlaydi. Yangi gap kelmasa, dalil to‘qilmaydi. Model bekor qilgan tool ID bajarilmaydi va unga javob yuborilmaydi. Bu alohida STT yoki ikkinchi eshituvchi emas.
 
 Xayrlashuv audiosi allaqachon ijroga berilgan bo‘lsa, keyingi “Tugadi” yoki ikkinchi xayrlashuv ijroga berilmaydi. Navbatdagi haqiqiy audio tugagandan keyin aloqa yopiladi; gapning oxiri kesilmaydi.
+
+Xayrlashuv matni uning oxirgi audio paketidan oldin kelsa ham joriy generatsiya oxirigacha qabul qilinadi. Keyingi javob faqat generatsiya tugagach bloklanadi; matnda xayrlashuv ko‘ringanining o‘zi ovozni kesmaydi.
 
 `voice_tool_events` faqat vosita nomi, xavfsiz natija kodi va vaqtini saqlaydi. Unda summa, mijoz matni, kalit yoki provayder xabari bo‘lmaydi. Bu kelgusida texnik uzilish bilan oddiy aniqlashtirishni ajratib tekshirishga yordam beradi. Eski suhbatlar natijasi qayta yozilmaydi.
 

@@ -480,6 +480,7 @@ class VoiceRuntime:
                                     and content.output_transcription.text
                                     and closing.accepts_output
                                 ):
+                                    closing.generation_started()
                                     flush("user")
                                     state["ai"] += content.output_transcription.text
                                     voice.transcript(
@@ -496,6 +497,7 @@ class VoiceRuntime:
                                             and part.inline_data.data
                                             and closing.accepts_output
                                         ):
+                                            closing.generation_started()
                                             closing.output()
                                             self.output.write(
                                                 part.inline_data.data,
@@ -503,10 +505,12 @@ class VoiceRuntime:
                                                 or "audio/pcm;rate=24000",
                                             )
                                 if content.generation_complete:
+                                    closing.generation_finished()
                                     # Audio generation can finish before the full
                                     # interaction: release the final filter samples now.
                                     self.output.finish()
                                 if content.turn_complete:
+                                    closing.generation_finished()
                                     flush("user")
                                     flush("ai")
                                     self.output.finish()

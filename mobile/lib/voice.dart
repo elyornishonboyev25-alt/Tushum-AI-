@@ -716,7 +716,7 @@ class _VoicePageState extends State<VoicePage> {
               ),
               const SizedBox(height: 6),
               const Text(
-                'Mijoz va AI gaplari alohida ko‘rsatiladi. Mijoz matni tahrirsiz STT natijasidir; audio yozuvi saqlanmaydi.',
+                'Mijoz va AI gaplari alohida ko‘rsatiladi. Audio yozuvi saqlanmaydi.',
                 style: TextStyle(color: Palette.muted, fontSize: 12),
               ),
               const SizedBox(height: 20),
@@ -772,18 +772,6 @@ class _VoicePageState extends State<VoicePage> {
                             padding: EdgeInsets.only(top: 6),
                             child: Text(
                               'Mijoz nutqi · STT',
-                              style: TextStyle(
-                                color: Palette.muted,
-                                fontSize: 10,
-                              ),
-                            ),
-                          ),
-                        if (item['source'] == 'legacy' ||
-                            item['source'] == null)
-                          const Padding(
-                            padding: EdgeInsets.only(top: 6),
-                            child: Text(
-                              'Avvalgi transkript',
                               style: TextStyle(
                                 color: Palette.muted,
                                 fontSize: 10,

@@ -66,3 +66,18 @@ class TurnTimingTests(unittest.TestCase):
         gate.turn_complete = True
         self.assertFalse(gate.accepts_output)
         self.assertFalse(gate.ready(3, False))
+
+    def test_farewell_caption_before_audio_tail_does_not_cut_off_its_words(self):
+        gate = ClosingGate()
+        gate.generation_started()  # Spoken caption can precede its audio chunks.
+        gate.request(1, goodbye_spoken=True)
+        self.assertTrue(gate.accepts_output)
+        self.assertFalse(gate.ready(2, True))
+        self.assertFalse(gate.ready(3, True))
+        gate.output()
+        self.assertTrue(gate.accepts_output)
+        self.assertFalse(gate.ready(2, False))
+        gate.generation_finished()
+        self.assertFalse(gate.accepts_output)
+        self.assertFalse(gate.ready(3, True))
+        self.assertTrue(gate.ready(4, True))

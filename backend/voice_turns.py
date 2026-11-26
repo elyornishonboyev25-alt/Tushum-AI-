@@ -30,14 +30,24 @@ class ClosingGate:
     output_after_request: bool = False
     turn_complete: bool = False
     drained_at: float | None = None
+    generation_active: bool = False
 
     @property
     def accepts_output(self):
         # A tool result can otherwise provoke a second goodbye or 'Tugadi'.
         # Play the already queued farewell, then close after its drain interval.
         return self.requested_at is None or not (
-            self.goodbye_spoken or self.output_after_request and self.turn_complete
+            self.goodbye_spoken
+            and not self.generation_active
+            or self.output_after_request
+            and self.turn_complete
         )
+
+    def generation_started(self):
+        self.generation_active = True
+
+    def generation_finished(self):
+        self.generation_active = False
 
     def request(self, now: float, goodbye_spoken: bool = False):
         if self.requested_at is None:
@@ -52,6 +62,11 @@ class ClosingGate:
 
     def ready(self, now: float, drained: bool) -> bool:
         if self.requested_at is None:
+            return False
+        if self.generation_active and now - self.requested_at < 15:
+            # Text may announce goodbye before the first/last audio packet.
+            # An empty playback queue alone is not an end-of-speech signal.
+            self.drained_at = None
             return False
         if not drained:
             self.drained_at = None

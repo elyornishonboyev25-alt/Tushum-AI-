@@ -19,6 +19,38 @@ def render(data, sizes):
 
 
 class AudioQualityTests(unittest.TestCase):
+    def test_jitter_buffer_preserves_all_samples_under_120ms_packet_gaps(self):
+        # Four 100 ms chunks, alternating 20 ms / 180 ms arrival gaps. The
+        # average delivery rate is real time; 60 ms prebuffer used to stutter.
+        output = SpeechOutput()
+        frames = []
+        for tick in range(65):
+            if tick in (0, 2, 20, 22):
+                output.write(np.full(2400, 1000, dtype="<i2").tobytes())
+                if tick == 22:
+                    output.finish()
+            pcm = output.read_frame()
+            if output.last_read_was_audio:
+                frames.append(pcm)
+        self.assertEqual(output.underruns, 0)
+        self.assertEqual(len(frames), 40)
+        self.assertTrue(output.drained)
+
+    def test_underrun_increases_refill_target_instead_of_restarting_each_packet(self):
+        output = SpeechOutput()
+        output.write(np.full(7200, 1000, dtype="<i2").tobytes())
+        for _ in range(len(output.frames) + 1):
+            output.read_frame()
+        self.assertEqual(output.underruns, 1)
+        self.assertGreater(output.refill_frames, output.startup_frames)
+        output.write(np.full(2400, 1000, dtype="<i2").tobytes())
+        self.assertEqual(output.read_frame(), bytes(output.frame_bytes))
+        self.assertFalse(output.last_read_was_audio)
+        output.finish()
+        played = b"".join(output.read_frame() for _ in range(len(output.frames)))
+        self.assertTrue(any(played))
+        self.assertTrue(output.drained)
+
     def test_prebuffer_silence_does_not_mark_generated_audio_as_delivered(self):
         output = SpeechOutput()
         output.read_frame()

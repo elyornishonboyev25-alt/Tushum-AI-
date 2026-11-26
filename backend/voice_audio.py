@@ -10,12 +10,14 @@ import soxr
 class SpeechOutput:
     """24 kHz model PCM -> 48 kHz Telegram PCM, preserving packet boundaries.
 
-    The 60 ms startup buffer absorbs small network bursts. soxr retains filter
+    The 180 ms startup buffer absorbs network bursts. An underrun increases
+    the refill target rather than repeatedly resuming on a tiny packet. soxr retains filter
     history across packets; flushing a turn keeps its final consonants intact.
     """
 
     frame_bytes = 960  # 10 ms, signed 16-bit little-endian mono at 48 kHz
-    startup_frames = 6
+    startup_frames = 18
+    max_startup_frames = 40
     max_frames = 2000
 
     def __init__(self):
@@ -33,6 +35,7 @@ class SpeechOutput:
         self.started = False
         self.has_input = False
         self.underruns = 0
+        self.refill_frames = self.startup_frames
         self.last_read_was_audio = False
 
     @property
@@ -97,7 +100,7 @@ class SpeechOutput:
     def read_frame(self):
         self.last_read_was_audio = False
         if not self.started:
-            if len(self.frames) >= self.startup_frames or self.finished and self.frames:
+            if len(self.frames) >= self.refill_frames or self.finished and self.frames:
                 self.started = True
             else:
                 return bytes(self.frame_bytes)
@@ -106,5 +109,6 @@ class SpeechOutput:
             return self.frames.popleft()
         if not self.finished and self.has_input:
             self.underruns += 1
+            self.refill_frames = min(self.max_startup_frames, self.refill_frames + 10)
         self.started = False
         return bytes(self.frame_bytes)

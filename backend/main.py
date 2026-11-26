@@ -902,24 +902,16 @@ def import_template(actor: Actor):
             {
                 "Nasiyalar": [
                     [
-                        "Ism",
-                        "Telefon",
-                        "Summa",
-                        "Muddat",
-                        "Savdo sanasi",
-                        "Hujjat",
-                        "Korxona",
-                        "Izoh",
+                        "Mijoz ismi",
+                        "Telegram username",
+                        "Qarz summasi",
+                        "Qarz sanasi",
                     ],
                     [
-                        "Namuna Mijoz",
-                        "+998900000001",
+                        "Akmal Namuna",
+                        "@akmal_namuna",
                         1500000,
-                        today(),
-                        today(),
-                        "NAMUNA-001",
-                        "Namuna Savdo",
-                        "Namuna qatorini almashtiring",
+                        (date.fromisoformat(today()) + timedelta(days=7)).isoformat(),
                     ],
                 ]
             }

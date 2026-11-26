@@ -5,6 +5,7 @@ import 'core.dart';
 import 'ui.dart';
 import 'app.dart' show ContentList;
 import 'settings.dart' show downloadFile;
+import 'spreadsheet_import_guide.dart';
 
 class SpreadsheetImportPage extends StatefulWidget {
   const SpreadsheetImportPage({super.key, required this.store});
@@ -23,9 +24,11 @@ class _SpreadsheetImportPageState extends State<SpreadsheetImportPage> {
   int limit = 50;
   String operationId = uuid.v4();
   String? submittedSelection;
+  bool showGuide = true;
   static const fieldNames = {
     'name': 'Mijoz ismi',
     'phone': 'Telefon raqami',
+    'telegram_username': 'Telegram username',
     'amount': 'Nasiya summasi',
     'due_on': 'To‘lov muddati',
     'issued_on': 'Savdo sanasi',
@@ -75,6 +78,7 @@ class _SpreadsheetImportPageState extends State<SpreadsheetImportPage> {
       if (!mounted) return;
       setState(() {
         preview = result;
+        showGuide = false;
         selected.clear();
         if (result['needs_mapping'] == true) {
           mapping = Map<String, dynamic>.from(result['mapping'] as Map? ?? {});
@@ -153,7 +157,7 @@ class _SpreadsheetImportPageState extends State<SpreadsheetImportPage> {
           ),
           const SizedBox(height: 10),
           const Text(
-            'Mijoz ismi, telefon, summa va muddat ustunlari kerak. Sana formati YYYY-MM-DD yoki DD.MM.YYYY.',
+            'Ism, qarz summasi va qaytarish muddati ustunlarini tanlang. Kontakt uchun Telegram username yoki telefon yetarli.',
             style: TextStyle(color: Palette.muted, height: 1.5),
           ),
           const SizedBox(height: 22),
@@ -167,7 +171,7 @@ class _SpreadsheetImportPageState extends State<SpreadsheetImportPage> {
                 isExpanded: true,
                 decoration: InputDecoration(
                   labelText:
-                      '${entry.value}${['name', 'phone', 'amount', 'due_on'].contains(entry.key) ? ' *' : ''}',
+                      '${entry.value}${['name', 'amount', 'due_on'].contains(entry.key) ? ' *' : ''}',
                 ),
                 items: [
                   const DropdownMenuItem(value: '', child: Text('Tanlanmagan')),
@@ -193,10 +197,13 @@ class _SpreadsheetImportPageState extends State<SpreadsheetImportPage> {
                 busy ||
                     ![
                       'name',
-                      'phone',
                       'amount',
                       'due_on',
-                    ].every((key) => text(mapping[key]).isNotEmpty)
+                    ].every((key) => text(mapping[key]).isNotEmpty) ||
+                    ![
+                      'phone',
+                      'telegram_username',
+                    ].any((key) => text(mapping[key]).isNotEmpty)
                 ? null
                 : upload,
             child: const Text('Yozuvlarni tekshirish'),
@@ -306,7 +313,7 @@ class _SpreadsheetImportPageState extends State<SpreadsheetImportPage> {
             children: [
               const SizedBox(height: 6),
               Text(
-                '${text(row['phone'])} · ${text(row['amount'])} so‘m\nMuddat ${displayDate(row['due_on'])}',
+                '${[if (text(row['telegram_username']).isNotEmpty) '@${row['telegram_username']}', if (text(row['phone']).isNotEmpty) text(row['phone'])].join(' · ')} · ${text(row['amount'])} so‘m\nQaytarish muddati ${displayDate(row['due_on'])}',
                 style: const TextStyle(
                   color: Palette.muted,
                   fontSize: 12,
@@ -337,16 +344,16 @@ class _SpreadsheetImportPageState extends State<SpreadsheetImportPage> {
   Widget build(BuildContext context) => PopScope(
     canPop: !busy,
     child: Scaffold(
-      appBar: AppBar(title: const Text('Excel / CSV import')),
+      appBar: AppBar(title: const Text('Excel yuklash')),
       body: ContentList(
         children: [
           Text(
-            'Daftaringizni raqamlashtiring',
+            'Mijozlaringizni bir fayldan qo‘shing',
             style: Theme.of(context).textTheme.headlineMedium,
           ),
           const SizedBox(height: 12),
           const Text(
-            'XLSX yoki UTF-8 CSV fayl · 10 MB gacha · 2 000 ta yozuv. Har bir qator bitta nasiyani bildiradi.',
+            'Mijoz ismi, Telegram username, qarz summasi va qaytarish muddatini yozing. Yuklagach, saqlashdan oldin tekshirasiz.',
             style: TextStyle(color: Palette.muted, height: 1.6),
           ),
           const SizedBox(height: 22),
@@ -373,8 +380,32 @@ class _SpreadsheetImportPageState extends State<SpreadsheetImportPage> {
                 icon: const Icon(Icons.file_download_outlined),
                 label: const Text('Shablon yuklash'),
               ),
+              TextButton.icon(
+                onPressed: () => setState(() => showGuide = !showGuide),
+                icon: Icon(
+                  showGuide ? Icons.expand_less : Icons.help_outline,
+                  size: 19,
+                ),
+                label: Text(
+                  showGuide ? 'Qo‘llanmani yashirish' : 'Qanday tayyorlanadi?',
+                ),
+              ),
             ],
           ),
+          const SizedBox(height: 12),
+          const Text(
+            'XLSX yoki UTF-8 CSV · 10 MB gacha · 2 000 ta yozuvgacha',
+            style: TextStyle(color: Palette.muted, fontSize: 12),
+          ),
+          if (showGuide) ...[
+            const SizedBox(height: 22),
+            SpreadsheetImportGuide(day: widget.store.currentDay),
+            const SizedBox(height: 12),
+            const Text(
+              'Shablondagi namunaviy qatorni o‘z mijozingiz bilan almashtiring. Import qo‘ng‘iroqni avtomatik boshlamaydi.',
+              style: TextStyle(color: Palette.muted, fontSize: 12, height: 1.6),
+            ),
+          ],
           if (file != null)
             Padding(
               padding: const EdgeInsets.only(top: 18),

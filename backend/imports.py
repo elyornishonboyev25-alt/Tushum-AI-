@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import csv
-from datetime import date, datetime
-from decimal import Decimal
 import hashlib
-from io import BytesIO, StringIO
 import json
 import re
 import zipfile
+from datetime import date, datetime
+from decimal import Decimal
+from io import BytesIO, StringIO
 
 from fastapi import HTTPException
 from openpyxl import Workbook, load_workbook
@@ -20,8 +20,23 @@ from .domain import add_debt, event, money, now, phone, today, uid
 ALIASES = {
     "name": ["ism", "mijoz", "mijozismi", "name", "fio", "имя"],
     "phone": ["telefon", "telefonraqami", "phone", "tel", "телефон"],
+    "telegram_username": [
+        "telegram",
+        "telegramusername",
+        "username",
+        "telegramuser",
+        "телеграм",
+    ],
     "amount": ["summa", "qarz", "qarzsummasi", "amount", "сумма"],
-    "due_on": ["muddat", "tolovsanasi", "due", "dueon", "срок"],
+    "due_on": [
+        "muddat",
+        "qarzsanasi",
+        "tolovmuddati",
+        "tolovsanasi",
+        "due",
+        "dueon",
+        "срок",
+    ],
     "issued_on": ["savdosanasi", "issuedon", "issued", "sana"],
     "reference": ["hujjat", "hujjatraqami", "reference", "invoice", "id"],
     "company": ["korxona", "company", "biznes"],
@@ -31,6 +46,61 @@ ALIASES = {
 
 def normalize_header(value) -> str:
     return re.sub(r"[^a-zа-я0-9]", "", str(value).lower())
+
+
+def telegram_username(value) -> str:
+    target = str(value or "").strip()
+    if not target:
+        return ""
+    if not re.fullmatch(r"@?[A-Za-z][A-Za-z0-9_]{4,31}", target):
+        raise ValueError(
+            "Telegram username’ni @akmal_namuna kabi yozing: 5–32 ta harf, raqam yoki pastki chiziq."
+        )
+    return target.removeprefix("@").lower()
+
+
+def contact_customer(connection, business_id, number, target):
+    """Resolve both identifiers without merging unrelated customer records."""
+    matches = []
+    if number:
+        matches = connection.execute(
+            "SELECT * FROM customers WHERE business_id=? AND phone=?",
+            (business_id, number),
+        ).fetchall()
+        if len(matches) > 1:
+            raise ValueError(
+                "Bu raqam bir nechta mijozda bor. Yozuvni qo‘lda kiriting."
+            )
+    if target:
+        linked = connection.execute(
+            "SELECT c.* FROM voice_contacts v JOIN customers c ON c.id=v.customer_id "
+            "WHERE v.business_id=? AND c.business_id=? AND v.target=?",
+            (business_id, business_id, target),
+        ).fetchone()
+        if linked:
+            matches.append(linked)
+    by_id = {row["id"]: dict(row) for row in matches}
+    if len(by_id) > 1:
+        raise ValueError(
+            "Telefon va Telegram username turli mijozlarga tegishli. Kontaktlarni tekshiring."
+        )
+    customer = next(iter(by_id.values()), None)
+    if customer:
+        if customer["archived"]:
+            raise ValueError("Avval mijozni arxivdan tiklang.")
+        if number and customer["phone"] and number != customer["phone"]:
+            raise ValueError(
+                "Bu Telegram username boshqa telefon raqamli mijozga ulangan."
+            )
+        existing_target = connection.execute(
+            "SELECT target FROM voice_contacts WHERE business_id=? AND customer_id=?",
+            (business_id, customer["id"]),
+        ).fetchone()
+        if target and existing_target and existing_target["target"] != target:
+            raise ValueError(
+                "Mijozga boshqa Telegram username ulangan. Avval mijoz ma’lumotlarini tekshiring."
+            )
+    return customer
 
 
 def parse_date(value, default=None) -> str:
@@ -54,7 +124,10 @@ def read_sheet(content: bytes, filename: str) -> tuple[list[str], list[list]]:
     try:
         if filename.lower().endswith(".xlsx"):
             with zipfile.ZipFile(BytesIO(content)) as package:
-                if sum(item.file_size for item in package.infolist()) > 40 * 1024 * 1024:
+                if (
+                    sum(item.file_size for item in package.infolist())
+                    > 40 * 1024 * 1024
+                ):
                     raise HTTPException(
                         413, "Jadval ochilgandagi hajm katta. Faylni qismlarga bo‘ling."
                     )
@@ -63,7 +136,9 @@ def read_sheet(content: bytes, filename: str) -> tuple[list[str], list[list]]:
             try:
                 for index, row in enumerate(book.active.iter_rows(values_only=True)):
                     if index > 2000:
-                        raise HTTPException(422, "Bir importda 2000 qatorgacha yuklang.")
+                        raise HTTPException(
+                            422, "Bir importda 2000 qatorgacha yuklang."
+                        )
                     rows.append(list(row[:40]))
             finally:
                 book.close()
@@ -90,7 +165,9 @@ def read_sheet(content: bytes, filename: str) -> tuple[list[str], list[list]]:
         ) from error
 
 
-def preview(connection, actor: dict, content: bytes, filename: str, mapping: dict) -> dict:
+def preview(
+    connection, actor: dict, content: bytes, filename: str, mapping: dict
+) -> dict:
     headers, raw_rows = read_sheet(content, filename)
     positions = {}
     for field, aliases in ALIASES.items():
@@ -101,17 +178,25 @@ def preview(connection, actor: dict, content: bytes, filename: str, mapping: dic
             ):
                 positions[field] = index
                 break
-    missing = [field for field in ("name", "phone", "amount", "due_on") if field not in positions]
+    missing = [
+        field for field in ("name", "amount", "due_on") if field not in positions
+    ]
+    if not any(field in positions for field in ("phone", "telegram_username")):
+        missing.append("contact")
     if missing:
         return {
             "needs_mapping": True,
             "headers": headers,
             "mapping": {field: headers[index] for field, index in positions.items()},
-            "required": ["name", "phone", "amount", "due_on"],
+            "required": ["name", "amount", "due_on"],
+            "contact_fields": ["telegram_username", "phone"],
         }
-    digest = hashlib.sha256(content + json.dumps(positions, sort_keys=True).encode()).hexdigest()
+    digest = hashlib.sha256(
+        content + json.dumps(positions, sort_keys=True).encode()
+    ).hexdigest()
     existing = connection.execute(
-        "SELECT * FROM imports WHERE business_id=? AND file_hash=?", (actor["business_id"], digest)
+        "SELECT * FROM imports WHERE business_id=? AND file_hash=?",
+        (actor["business_id"], digest),
     ).fetchone()
     if existing:
         return import_view(dict(existing))
@@ -121,16 +206,21 @@ def preview(connection, actor: dict, content: bytes, filename: str, mapping: dic
         if all(value is None or str(value).strip() == "" for value in row):
             continue
 
-        def cell(field):
+        def cell(field, row=row):
             position = positions.get(field)
-            return row[position] if position is not None and position < len(row) else None
+            return (
+                row[position] if position is not None and position < len(row) else None
+            )
 
         item = {"index": index, "line": index + 2, "error": "", "warning": ""}
         try:
             item.update(
                 {
                     "name": str(cell("name") or "").strip(),
-                    "phone": phone(str(cell("phone") or "")),
+                    "phone": phone(str(cell("phone")))
+                    if str(cell("phone") or "").strip()
+                    else "",
+                    "telegram_username": telegram_username(cell("telegram_username")),
                     "amount": str(Decimal(money(str(cell("amount") or ""))) / 100),
                     "due_on": parse_date(cell("due_on")),
                     "issued_on": parse_date(cell("issued_on"), today()),
@@ -141,6 +231,8 @@ def preview(connection, actor: dict, content: bytes, filename: str, mapping: dic
             )
             if not 2 <= len(item["name"]) <= 120:
                 raise ValueError("Mijoz ismi 2–120 belgi bo‘lsin.")
+            if not item["phone"] and not item["telegram_username"]:
+                raise ValueError("Telegram username yoki telefon raqamini kiriting.")
             if (
                 len(item["reference"]) > 100
                 or len(item["note"]) > 2000
@@ -149,21 +241,26 @@ def preview(connection, actor: dict, content: bytes, filename: str, mapping: dic
                 raise ValueError("Hujjat, izoh yoki korxona matni juda uzun.")
             if item["due_on"] < item["issued_on"] or item["issued_on"] > today():
                 raise ValueError("Savdo va to‘lov sanalarini tekshiring.")
-            matches = connection.execute(
-                "SELECT id,name,archived FROM customers WHERE business_id=? AND phone=?",
-                (actor["business_id"], item["phone"]),
-            ).fetchall()
-            if len(matches) > 1:
-                raise ValueError("Bu raqam bir nechta mijozda bor. Yozuvni qo‘lda kiriting.")
-            if matches and matches[0]["archived"]:
-                raise ValueError("Avval mijozni arxivdan tiklang.")
-            if matches:
-                item["customer_id"] = matches[0]["id"]
-                if matches[0]["name"].casefold() != item["name"].casefold():
-                    item["warning"] = f"Raqam mavjud mijozga tegishli — {matches[0]['name']}."
+            customer = contact_customer(
+                connection,
+                actor["business_id"],
+                item["phone"],
+                item["telegram_username"],
+            )
+            if customer:
+                item["customer_id"] = customer["id"]
+                if customer["name"].casefold() != item["name"].casefold():
+                    item["warning"] = (
+                        f"Kontakt mavjud mijozga tegishli — {customer['name']}."
+                    )
                 duplicate = connection.execute(
                     "SELECT id FROM debts WHERE customer_id=? AND amount=? AND issued_on=? AND due_on=?",
-                    (matches[0]["id"], money(item["amount"]), item["issued_on"], item["due_on"]),
+                    (
+                        customer["id"],
+                        money(item["amount"]),
+                        item["issued_on"],
+                        item["due_on"],
+                    ),
                 ).fetchone()
                 if duplicate:
                     item["warning"] = "Shu summa va sanalarga o‘xshash nasiya mavjud."
@@ -220,7 +317,8 @@ def commit_import(
     connection, actor: dict, import_id: str, indexes: list[int], accepted: list[int]
 ) -> dict:
     row = connection.execute(
-        "SELECT * FROM imports WHERE id=? AND business_id=?", (import_id, actor["business_id"])
+        "SELECT * FROM imports WHERE id=? AND business_id=?",
+        (import_id, actor["business_id"]),
     ).fetchone()
     if row is None:
         raise HTTPException(404, "Import topilmadi.")
@@ -232,24 +330,42 @@ def commit_import(
     for index in selected:
         item = source.get(index)
         if item is None or item["error"]:
-            raise HTTPException(422, "Xatoli qator tanlangan. Importni qayta tekshiring.")
+            raise HTTPException(
+                422, "Xatoli qator tanlangan. Importni qayta tekshiring."
+            )
         if item["warning"] and index not in accepted:
             raise HTTPException(409, "Ogohlantirishli qatorlarni alohida tasdiqlang.")
-        customers = connection.execute(
-            "SELECT id,archived FROM customers WHERE business_id=? AND phone=?",
-            (actor["business_id"], item["phone"]),
-        ).fetchall()
-        if len(customers) > 1 or (customers and customers[0]["archived"]):
-            raise HTTPException(409, "Mijoz ma’lumoti yangilangan. Faylni qayta tekshiring.")
-        if customers:
-            customer_id = customers[0]["id"]
+        target = item.get("telegram_username", "")
+        try:
+            customer = contact_customer(
+                connection, actor["business_id"], item["phone"], target
+            )
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+        if item.get("customer_id") and (
+            not customer or customer["id"] != item["customer_id"]
+        ):
+            raise HTTPException(
+                409, "Mijoz kontakti yangilangan. Faylni qayta tekshiring."
+            )
+        if customer:
+            customer_id = customer["id"]
+            if (
+                customer["name"].casefold() != item["name"].casefold()
+                and index not in accepted
+            ):
+                raise HTTPException(
+                    409,
+                    "Kontakt boshqa ismli mijozga tegishli. Faylni qayta tekshiring.",
+                )
             duplicate = connection.execute(
                 "SELECT id FROM debts WHERE customer_id=? AND amount=? AND issued_on=? AND due_on=?",
                 (customer_id, money(item["amount"]), item["issued_on"], item["due_on"]),
             ).fetchone()
             if duplicate and index not in accepted:
                 raise HTTPException(
-                    409, f"{item['line']}-qatorda o‘xshash yozuv mavjud. Qayta ko‘rib chiqing."
+                    409,
+                    f"{item['line']}-qatorda o‘xshash yozuv mavjud. Qayta ko‘rib chiqing.",
                 )
         else:
             customer_id = uid()
@@ -274,16 +390,34 @@ def commit_import(
                 item["name"],
                 customer_id=customer_id,
             )
+        if target:
+            connection.execute(
+                "INSERT INTO voice_contacts(business_id,target,customer_id,created_at) VALUES (?,?,?,?) "
+                "ON CONFLICT(business_id,target) DO NOTHING",
+                (actor["business_id"], target, customer_id, now()),
+            )
+        if customer and item["phone"] and not customer["phone"]:
+            connection.execute(
+                "UPDATE customers SET phone=?,updated_at=? WHERE id=? AND business_id=?",
+                (item["phone"], now(), customer_id, actor["business_id"]),
+            )
         data = dict(
-            item, customer_id=customer_id, title=item["reference"] or "Import qilingan nasiya"
+            item,
+            customer_id=customer_id,
+            title=item["reference"] or "Import qilingan nasiya",
         )
         created.append(add_debt(connection, actor, data))
     result = {"count": len(created), "debt_ids": created}
     connection.execute(
-        "UPDATE imports SET committed=1,result_json=? WHERE id=?", (json.dumps(result), import_id)
+        "UPDATE imports SET committed=1,result_json=? WHERE id=?",
+        (json.dumps(result), import_id),
     )
     event(
-        connection, actor, "import", "Excel importi yakunlandi", f"{len(created)} ta nasiya yozuvi"
+        connection,
+        actor,
+        "import",
+        "Excel importi yakunlandi",
+        f"{len(created)} ta nasiya yozuvi",
     )
     return result
 

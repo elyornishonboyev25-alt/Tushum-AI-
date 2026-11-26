@@ -50,7 +50,7 @@ APK ishlab chiqish imzosi bilan yig‘ilgan sinov versiyasidir. Mahalliy HTTP ul
 | Qaytarim | Biznes egasi orqali qisman yoki to‘liq qaytarim, sabab va audit tarixi |
 | Va’dalar | Summa va sana bo‘yicha kelishuv, bo‘lib to‘lash, tahrirlash, bekor qilish va bajarilish holati |
 | E’tirozlar | Nasiya bo‘yicha e’tiroz va uning yechimini saqlash |
-| Import | XLSX va UTF-8 CSV, ustun moslash, oldindan tekshirish, qator tanlash va takroriy import nazorati |
+| Import | XLSX va UTF-8 CSV, interaktiv namuna, Telegram username yoki telefon orqali mijozni aniqlash, ustun moslash, oldindan tekshirish va takroriy import nazorati |
 | Hisobot | Davr tanlash, tushum, qaytarim, sof tushum, kunlik grafik, joriy qoldiq va kechikish muddati |
 | Eksport | Excel hisobot va biznes yozuvlarining JSON nusxasi |
 | Faoliyat | Amal, foydalanuvchi, sana va izoh bo‘yicha tarix, oldingi amallarni bosqichma-bosqich yuklash |

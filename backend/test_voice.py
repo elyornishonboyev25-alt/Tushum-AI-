@@ -132,6 +132,270 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(data["payments"], [])
         self.assertEqual(data["debts"][0]["balance"], 100000000)
 
+    def test_schedule_accepts_attached_uzbek_case_endings_and_remainder(self):
+        call = self.start()
+        voice.change_status(call, "connected")
+        tomorrow = (date.fromisoformat(today()) + timedelta(days=1)).isoformat()
+        for words in (
+            "Uch yuz mingni bugun, yetti yuz mingni ertaga beraman.",
+            "Uch yuz mingni bugun, qolganini ertaga beraman.",
+            "Уч юз мингни бугун, қолганини эртага бераман.",
+        ):
+            with self.subTest(words=words):
+                voice.transcript(call, "offer", "customer", words, True)
+                result = voice.execute_tool(
+                    call,
+                    "propose_schedule",
+                    {
+                        "installments": [
+                            {"amount": "300000", "due_on": today()},
+                            {"amount": "700000", "due_on": tomorrow},
+                        ]
+                    },
+                )
+                self.assertIn("proposal_id", result)
+        workspace = self.client.get("/api/workspace", headers=self.headers()).json()
+        self.assertEqual(workspace["promises"], [])
+
+    def test_schedule_cannot_invent_a_remainder_or_split_it_into_unknown_parts(self):
+        call = self.start()
+        voice.change_status(call, "connected")
+        tomorrow = (date.fromisoformat(today()) + timedelta(days=1)).isoformat()
+        voice.transcript(
+            call,
+            "offer",
+            "customer",
+            "Uch yuz mingni bugun beraman. Qolganini hali aytmadim.",
+            True,
+        )
+        result = voice.execute_tool(
+            call,
+            "propose_schedule",
+            {
+                "installments": [
+                    {"amount": "300000", "due_on": today()},
+                    {"amount": "700000", "due_on": tomorrow},
+                ]
+            },
+        )
+        self.assertEqual(result["error_code"], "amount_mismatch")
+        voice.transcript(
+            call,
+            "offer",
+            "customer",
+            "Uch yuz mingni bugun, qolganini keyin beraman.",
+            True,
+        )
+        result = voice.execute_tool(
+            call,
+            "propose_schedule",
+            {
+                "installments": [
+                    {"amount": "300000", "due_on": today()},
+                    {"amount": "400000", "due_on": tomorrow},
+                    {"amount": "300000", "due_on": tomorrow},
+                ]
+            },
+        )
+        self.assertIn("error", result)
+
+    def test_explicit_percentage_offer_can_be_split_without_guessing(self):
+        call = self.start()
+        voice.change_status(call, "connected")
+        tomorrow = (date.fromisoformat(today()) + timedelta(days=1)).isoformat()
+        voice.transcript(
+            call,
+            "offer",
+            "customer",
+            "O‘ttiz foizini bugun, qolganini ertaga beraman.",
+            True,
+        )
+        result = voice.execute_tool(
+            call,
+            "propose_schedule",
+            {
+                "installments": [
+                    {"amount": "300000", "due_on": today()},
+                    {"amount": "700000", "due_on": tomorrow},
+                ]
+            },
+        )
+        self.assertIn("proposal_id", result)
+
+    def test_missing_amount_is_a_clarification_not_a_technical_handoff(self):
+        from . import database
+
+        call = self.start()
+        voice.change_status(call, "connected")
+        voice.transcript(call, "greeting", "customer", "Alo, ha eshityapman.", True)
+        result = voice.execute_tool(
+            call, "propose_promise", {"amount": "500000", "due_on": today()}
+        )
+        self.assertEqual(result["error_code"], "amount_required")
+        self.assertTrue(result["recoverable"])
+        handoff = voice.execute_tool(
+            call,
+            "finish_call",
+            {
+                "outcome": "human_requested",
+                "summary": "Tizimdagi texnik muammo sabab jadval qabul qilinmadi, menejer bilan bog‘lanish so‘raldi.",
+            },
+        )
+        self.assertIn("error", handoff)
+        with database.read() as c:
+            self.assertEqual(
+                c.execute(
+                    "SELECT COUNT(*) FROM voice_handoffs WHERE call_id=?", (call,)
+                ).fetchone()[0],
+                0,
+            )
+            codes = [
+                r[0]
+                for r in c.execute(
+                    "SELECT code FROM voice_tool_events WHERE call_id=? ORDER BY seq",
+                    (call,),
+                )
+            ]
+        self.assertEqual(codes, ["amount_required", "amount_required"])
+
+    def test_real_human_request_is_honored_without_false_technical_reason(self):
+        call = self.start()
+        voice.change_status(call, "connected")
+        voice.transcript(call, "greeting", "customer", "Alo.", True)
+        voice.execute_tool(
+            call, "propose_promise", {"amount": "500000", "due_on": today()}
+        )
+        voice.transcript(
+            call,
+            "human",
+            "customer",
+            "Menejer bilan gaplashmoqchiman, ulab bering.",
+            True,
+        )
+        result = voice.execute_tool(
+            call,
+            "finish_call",
+            {
+                "outcome": "human_requested",
+                "summary": "Texnik nosozlik tufayli mijoz menejer bilan bog‘lanishni so‘radi.",
+            },
+        )
+        self.assertTrue(result.get("finish"), result)
+        detail = self.client.get(
+            f"/api/voice/calls/{call}", headers=self.headers()
+        ).json()
+        self.assertNotIn("Texnik", detail["handoff"]["summary"])
+
+    def test_accounting_outage_is_distinct_from_missing_amount(self):
+        import sqlite3
+
+        call = self.start()
+        voice.change_status(call, "connected")
+        with patch.object(
+            voice,
+            "_execute_tool",
+            side_effect=sqlite3.OperationalError("test database unavailable"),
+        ):
+            result = voice.execute_tool(
+                call, "propose_promise", {"amount": "500000", "due_on": today()}
+            )
+        self.assertEqual(result["error_code"], "accounting_unavailable")
+        self.assertFalse(result["recoverable"])
+        workspace = self.client.get("/api/workspace", headers=self.headers()).json()
+        self.assertEqual(workspace["promises"], [])
+
+    def test_fully_reserved_balance_is_a_business_validation_not_bad_format(self):
+        from . import database
+        from .domain import add_promise
+
+        call = self.start()
+        voice.change_status(call, "connected")
+        with database.write() as c:
+            add_promise(
+                c,
+                self.auth["user"],
+                {
+                    "debt_id": self.debt,
+                    "amount": "1000000",
+                    "due_on": today(),
+                    "note": "Existing agreement",
+                },
+            )
+        voice.transcript(
+            call, "offer", "customer", "Besh yuz mingni bugun beraman.", True
+        )
+        result = voice.execute_tool(
+            call, "propose_promise", {"amount": "500000", "due_on": today()}
+        )
+        self.assertEqual(result["error_code"], "available_balance")
+
+    def test_completed_payment_claim_is_not_relabelled_as_a_fresh_dispute(self):
+        call = self.start()
+        voice.change_status(call, "connected")
+        voice.transcript(
+            call,
+            "paid",
+            "customer",
+            "Kecha qarzimni to‘liq to‘laganman. Men qayta to‘lamayman, menejer tushumni tekshirsin.",
+            True,
+        )
+        result = voice.execute_tool(
+            call,
+            "finish_call",
+            {"outcome": "disputed", "summary": "Mijoz qayta to‘lashdan bosh tortdi."},
+        )
+        self.assertEqual(result["outcome"], "payment_claimed")
+        workspace = self.client.get("/api/workspace", headers=self.headers()).json()
+        self.assertEqual(workspace["payments"], [])
+        self.assertEqual(workspace["debts"][0]["balance"], 100000000)
+
+    def test_past_payment_detection_preserves_negation_and_future_tense(self):
+        from .voice_evidence import payment_claimed
+
+        for words in (
+            "Kecha to‘lamaganman.",
+            "Ertaga to‘layman.",
+            "Я не оплатил.",
+            "To‘ladim demadim.",
+            "To‘ladim?",
+        ):
+            with self.subTest(words=words):
+                self.assertFalse(payment_claimed(words))
+        for words in (
+            "Кеча тўлаганман.",
+            "Я оплатил вчера, второй раз платить не буду.",
+            "Kecha to‘ladim, yana to‘lamayman.",
+        ):
+            with self.subTest(words=words):
+                self.assertTrue(payment_claimed(words))
+
+    def test_alo_and_conditional_responses_never_confirm_a_schedule(self):
+        call = self.start()
+        proposal = self.propose(call)
+        voice.transcript(
+            call,
+            "ai-readback",
+            "ai",
+            "Besh yuz ming so‘m bugun. Shu kelishuv to‘g‘rimi?",
+            True,
+        )
+        for answer in (
+            "Alo.",
+            "Alo, ha, eshityapman.",
+            "Ha, lekin pul tushsa.",
+            "Mayli, harakat qilaman.",
+            "Ha?",
+            "Yo‘q, qaytarib ayting.",
+        ):
+            with self.subTest(answer=answer):
+                voice.transcript(call, "answer", "customer", answer, True)
+                result = voice.execute_tool(
+                    call, "confirm_promise", {"proposal_id": proposal}
+                )
+                self.assertEqual(result["error_code"], "confirmation_required")
+        workspace = self.client.get("/api/workspace", headers=self.headers()).json()
+        self.assertEqual(workspace["promises"], [])
+
     def test_model_cannot_change_the_customers_spoken_amount(self):
         call = self.start()
         voice.change_status(call, "connected")

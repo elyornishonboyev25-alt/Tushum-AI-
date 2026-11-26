@@ -228,7 +228,61 @@ def explicit_payment_values(text, balance):
         r"\b(hammasini|hammasi|toliq|полностью|всю)\b", words + " " + latinized(words)
     ):
         values.add(Decimal(balance))
+    for match in re.finditer(
+        r"((?:\d+(?:[.,]\d+)?|[^\W\d_]+)(?:\s+[^\W\d_]+){0,2})\s*(?:%|foiz\w*|фоиз\w*|процент\w*)",
+        words,
+    ):
+        percentages = number_values(match[1])
+        if len(percentages) == 1 and 0 < percentages[0] <= 100:
+            values.add(Decimal(balance) * percentages[0] / 100)
     return values
+
+
+def remainder_offered(text):
+    words = normalized(text)
+    words += " " + latinized(words)
+    return bool(
+        re.search(
+            r"\b(qolganini|qolgani|qoldigini|остальное|остаток|оставшуюся)\b", words
+        )
+    ) and not bool(
+        re.search(
+            r"qolgan\w*.*(?:aytmadim|bermay|bilmay|v[ao]da berm)|\b(?:не|нет)\b", words
+        )
+    )
+
+
+def human_requested(text):
+    words = normalized(text)
+    words += " " + latinized(words)
+    return bool(
+        re.search(
+            r"\b(menejer|menedjer|xodim|odam|egasi|manager|оператор|менеджер|человек)\w*",
+            words,
+        )
+    ) and bool(
+        re.search(
+            r"gaplash|boglan|chaqir|ulay|ulab|bering|керak|kerak|pozov|соедин|позов|говор|хочу",
+            words,
+        )
+    )
+
+
+def payment_claimed(text):
+    words = normalized(text)
+    words += " " + latinized(words)
+    pattern = r"\b(toladim|tolaganman|tolagandim|tolab bolganman|otkazdim|otkazganman|оплатил[аи]?|заплатил[аи]?|перев[её]л[аи]?|погасил[аи]?)\b"
+    for match in re.finditer(pattern, words):
+        before = words[max(0, match.start() - 15) : match.start()]
+        after = words[match.end() : match.end() + 26]
+        if re.search(r"\bне\s*$", before) or re.match(
+            r"\s*(?:deb\s+)?(?:aytmadim|demadim|emas|не говорил)", after
+        ):
+            continue
+        if after.lstrip().startswith("?"):
+            continue
+        return True
+    return False
 
 
 def negative(text):

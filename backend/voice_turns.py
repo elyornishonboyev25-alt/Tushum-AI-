@@ -31,6 +31,14 @@ class ClosingGate:
     turn_complete: bool = False
     drained_at: float | None = None
 
+    @property
+    def accepts_output(self):
+        # A tool result can otherwise provoke a second goodbye or 'Tugadi'.
+        # Play the already queued farewell, then close after its drain interval.
+        return self.requested_at is None or not (
+            self.goodbye_spoken or self.output_after_request and self.turn_complete
+        )
+
     def request(self, now: float, goodbye_spoken: bool = False):
         if self.requested_at is None:
             self.requested_at = now

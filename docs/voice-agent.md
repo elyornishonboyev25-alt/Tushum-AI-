@@ -30,6 +30,20 @@ Moliyaviy yozuvlar hali ham alohida server tekshiruvlaridan o‘tadi: aniq summa
 
 `scripts/evaluate_voice_roundtrip.py` modelning haqiqiy kirish/chiqish audiosini va ilovaning jonli suhbat oqimini izolyatsiyalangan bazada tekshiradi. Faqat Telegram transporti simulyatsiya qilinadi; haqiqiy foydalanuvchiga qo‘ng‘iroq qilinmaydi. Sinovda sukut paketlari yuborilmasligi ham tekshiriladi.
 
+### Jadval va suhbatni tiklash
+
+“Mingni”, “millionni”, “uch yuz mingni bugun” kabi qo‘shimchali summa so‘zlari lotin va o‘zbek kirill yozuvida tekshiriladi. “Uch yuz mingni bugun, qolganini ertaga” bitta aniq qism va haqiqiy qarz qoldig‘ining bitta qolgan qismini bildiradi. Qoldiqdan bir nechta aytilmagan to‘lov yaratib bo‘lmaydi. Aniq aytilgan foiz (“o‘ttiz foizini”) haqiqiy qoldiqdan hisoblanib, ovoz chiqarib qayta o‘qiladi; hali tasdiqlanmaguncha va’da yozilmaydi. “Alo”, shartli gap, savol yoki summa tuzatishi tasdiq bo‘lmaydi.
+
+Vositalar `error_code`, `recoverable` va kerak bo‘lsa `ask_customer` qaytaradi. Summa/sana yetishmasligi, bo‘sh qoldiq yoki tasdiq yetishmasligi texnik nosozlik deb aytilmaydi. Faqat SQLite/hisob xizmati xatosi `accounting_unavailable` bo‘ladi. Tasdiqlanmagan jadvalni saqlangan deb aytish yoki mijoz so‘ramagan menejerga murojaatni texnik nosozlik bilan izohlash tekshiriladi.
+
+Modelning ichki subtitri va moliyaviy vositasi turli tartibda kelishi mumkin. Alohida vosita navbati audioni qabul qilishni bloklamaydi; faqat dalil yetishmagan xatoda yangi yakuniy subtitrni 650 ms gacha kutib, tekshiruvni bir marta takrorlaydi. Yangi gap kelmasa, dalil to‘qilmaydi. Model bekor qilgan tool ID bajarilmaydi va unga javob yuborilmaydi. Bu alohida STT yoki ikkinchi eshituvchi emas.
+
+Xayrlashuv audiosi allaqachon ijroga berilgan bo‘lsa, keyingi “Tugadi” yoki ikkinchi xayrlashuv ijroga berilmaydi. Navbatdagi haqiqiy audio tugagandan keyin aloqa yopiladi; gapning oxiri kesilmaydi.
+
+`voice_tool_events` faqat vosita nomi, xavfsiz natija kodi va vaqtini saqlaydi. Unda summa, mijoz matni, kalit yoki provayder xabari bo‘lmaydi. Bu kelgusida texnik uzilish bilan oddiy aniqlashtirishni ajratib tekshirishga yordam beradi. Eski suhbatlar natijasi qayta yozilmaydi.
+
+Qo‘shimcha ovozli regressiya namunalarini `scripts/evaluate_voice_roundtrip.py --scenario alo_schedule` orqali bajarish mumkin. Boshqa holatlar: `explicit_schedule`, `disputed`, `opt_out`, `conditional`, `already_paid`, `correction`, `busy`. Bular sun’iy audio va simulyatsiyalangan Telegram transporti; haqiqiy odamlarning nutqidagi xatosizlikni isbotlamaydi.
+
 ## Railway sozlamalari
 
 Mavjud FastAPI servisida bitta worker ishlaydi. Bitta Telegram sessiyasini turli serverlarda bir vaqtning o‘zida ishga tushirmang. Railway’da replica sonini 1 saqlang va eski deployment to‘xtaganidan keyin yangisini ishga tushiring. Bir xil sessiya bir necha IP manzilida parallel ishlasa, Telegram uning ruxsatini bekor qilishi mumkin.

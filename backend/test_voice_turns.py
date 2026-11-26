@@ -47,3 +47,22 @@ class TurnTimingTests(unittest.TestCase):
         self.assertFalse(gate.ready(14, True))
         self.assertFalse(gate.ready(15, True))
         self.assertTrue(gate.ready(16, True))
+
+    def test_goodbye_already_queued_blocks_a_second_generated_goodbye(self):
+        gate = ClosingGate()
+        self.assertTrue(gate.accepts_output)
+        gate.request(1, goodbye_spoken=True)
+        self.assertFalse(gate.accepts_output)
+        self.assertFalse(gate.ready(2, False))
+        self.assertFalse(gate.ready(3, True))
+        self.assertTrue(gate.ready(4, True))
+
+    def test_only_one_complete_reply_is_accepted_after_finish_tool(self):
+        gate = ClosingGate()
+        gate.request(1)
+        self.assertTrue(gate.accepts_output)
+        gate.output()
+        self.assertTrue(gate.accepts_output)
+        gate.turn_complete = True
+        self.assertFalse(gate.accepts_output)
+        self.assertFalse(gate.ready(3, False))

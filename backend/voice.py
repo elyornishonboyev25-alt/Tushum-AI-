@@ -7,7 +7,9 @@ import json
 import logging
 import os
 import re
+import sqlite3
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -28,7 +30,12 @@ from .domain import (
     uid,
 )
 from .security import current_user
-from .voice_evidence import explicit_payment_values
+from .voice_evidence import (
+    explicit_payment_values,
+    human_requested,
+    payment_claimed,
+    remainder_offered,
+)
 from .voice_policy import POLICY_VERSION
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
@@ -76,6 +83,11 @@ CREATE TABLE IF NOT EXISTS voice_transcript (
  is_final INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
  UNIQUE(call_id,utterance_id)
 );
+CREATE TABLE IF NOT EXISTS voice_tool_events (
+ seq INTEGER PRIMARY KEY AUTOINCREMENT, call_id TEXT NOT NULL REFERENCES voice_calls(id),
+ tool TEXT NOT NULL, code TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS voice_tool_events_call ON voice_tool_events(call_id,seq);
 """
 
 # Runtime details contain safe codes, never credentials or provider exception messages.
@@ -660,7 +672,60 @@ def change_status(call_id, status, *, error_code="", latency=None):
             )
 
 
+def tool_error(code, message, question):
+    return {
+        "error": message,
+        "error_code": code,
+        "recoverable": True,
+        "ask_customer": question,
+        "instruction": "Bu texnik nosozlik emas. Savolni tabiiy o‘zbekcha bering, javobni kuting va tuzatilgan taklifni tekshiring. Menejerga o‘tkazishga shoshilmang.",
+    }
+
+
 def execute_tool(call_id: str, name: str, args: dict) -> dict:
+    try:
+        result = _execute_tool(call_id, name, args)
+    except sqlite3.Error:
+        log.error("Voice accounting operation unavailable")
+        result = {
+            "error": "Hisob xizmati hozir javob bermadi. Kelishuv saqlandi deb aytmang.",
+            "error_code": "accounting_unavailable",
+            "recoverable": False,
+            "instruction": "Mijozga kelishuv saqlanmaganini qisqa ayting va menejer tekshiruvini taklif qiling.",
+        }
+    code = result.get(
+        "error_code", "validation_required" if "error" in result else "ok"
+    )
+    if "error" in result and "error_code" not in result:
+        result.update(error_code=code, recoverable=True)
+    # Record only safe operation names/codes, never amounts, customer text or
+    # provider payloads. A diagnostic write must not undo a successful action.
+    if name in (
+        "propose_promise",
+        "propose_schedule",
+        "confirm_promise",
+        "finish_call",
+    ):
+        try:
+            with database.write() as c:
+                c.execute(
+                    "INSERT INTO voice_tool_events(call_id,tool,code,created_at) VALUES (?,?,?,?)",
+                    (call_id, name, code, now()),
+                )
+        except Exception:  # noqa: BLE001 - diagnostics must not affect accounting
+            log.warning("Voice tool diagnostics unavailable")
+    log.info(
+        "Voice tool %s result=%s",
+        name
+        if name
+        in ("propose_promise", "propose_schedule", "confirm_promise", "finish_call")
+        else "unknown",
+        code,
+    )
+    return result
+
+
+def _execute_tool(call_id: str, name: str, args: dict) -> dict:
     """All model actions pass through accounting and conversation-state validation."""
     try:
         with database.write() as c:
@@ -700,9 +765,11 @@ def execute_tool(call_id: str, name: str, args: dict) -> dict:
                         <= due
                         <= date.fromisoformat(today()) + timedelta(days=365)
                     ):
-                        return {
-                            "error": "Bugundan keyingi 365 kun ichida aniq sanani so‘rang."
-                        }
+                        return tool_error(
+                            "date_required",
+                            "Bugundan keyingi 365 kun ichida aniq sanani so‘rang.",
+                            "Qaysi kuni to‘laysiz?",
+                        )
                     installments.append(
                         {"amount": part_amount, "due_on": due.isoformat()}
                     )
@@ -715,21 +782,15 @@ def execute_tool(call_id: str, name: str, args: dict) -> dict:
                         (call_id,),
                     )
                 ]
-                customer_words = re.sub(r"[^\w\s]", "", " ".join(utterances).lower())
-                # The assistant repeating the balance is not a customer's payment offer.
-                has_amount = re.search(
-                    r"\b(ming|million(?:ni|dan|ga)?|mln|som|yarmini|yarim|yarmi|hammasini|hammasi|toliq|qolganini|минг|сўм|ярмини|ҳаммасини|тўлиқ|тысяч(?:а|и|у)?|тыс|миллион(?:а|ов|ы)?|полмиллиона|полтора|сум(?:ов)?|половину|всю)\b|\b\d{4,}\b",
-                    customer_words,
-                )
                 latest_words = (
                     re.sub(r"[^\w\s]", "", utterances[0].lower()) if utterances else ""
                 )
-                if not has_amount or re.search(
-                    r"summa.*kelishmadik|summani.*aytmadim", latest_words
-                ):
-                    return {
-                        "error": "Mijoz hali qancha to‘lashini aytmadi. Summani o‘zingiz taxmin qilmang. Avval muloyim so‘rang."
-                    }
+                if re.search(r"summa.*kelishmadik|summani.*aytmadim", latest_words):
+                    return tool_error(
+                        "amount_required",
+                        "Mijoz qancha to‘lashini hali aytmadi.",
+                        "Qancha to‘lash sizga qulay?",
+                    )
                 debt = scoped(c, "debts", call["debt_id"], call["business_id"])
                 _, context = context_for(c, actor, debt)
                 evidence = set().union(
@@ -738,17 +799,43 @@ def execute_tool(call_id: str, name: str, args: dict) -> dict:
                         for words in utterances
                     )
                 )
-                if any(
-                    part["amount"] not in {value * 100 for value in evidence}
+                allowed_amounts = {value * 100 for value in evidence}
+                unmatched = [
+                    part
                     for part in installments
+                    if part["amount"] not in allowed_amounts
+                ]
+                # '300 ming bugun, qolganini ertaga' grounds one residual amount
+                # in the real balance. It never permits inventing multiple parts.
+                residual = (
+                    len(installments) > 1
+                    and len(unmatched) == 1
+                    and amount == int(Decimal(context["balance_som"]) * 100)
+                    and any(remainder_offered(words) for words in utterances)
+                    and len(
+                        {
+                            part["amount"]
+                            for part in installments
+                            if part["amount"] in allowed_amounts
+                        }
+                    )
+                    == len(installments) - 1
+                )
+                if (
+                    any(part["amount"] not in allowed_amounts for part in installments)
+                    and not residual
                 ):
-                    return {
-                        "error": "Taklifdagi summa mijoz aytgan summaga mos emas. Qancha to‘lashini aniq so‘rang; hisobdagi summadan taxmin qilmang."
-                    }
-                if amount > money(context["available_promise_som"]):
-                    return {
-                        "error": "Summa bo‘sh qoldiqdan katta. Mavjud va’dani o‘zgartirishni menejer ko‘rib chiqadi."
-                    }
+                    return tool_error(
+                        "amount_required" if not evidence else "amount_mismatch",
+                        "Taklifdagi summa mijoz aytgan summaga mos emas.",
+                        "Aniq qancha to‘lashingizni yana bir aytasizmi?",
+                    )
+                if amount > int(Decimal(context["available_promise_som"]) * 100):
+                    return tool_error(
+                        "available_balance",
+                        "Summa yangi kelishuv uchun bo‘sh qoldiqdan katta. Avvalgi va’dalar o‘zgarishsiz saqlanadi.",
+                        "Hisobda oldingi va’da bor ekan. Shu kelishuvni o‘zgartirmoqchimisiz?",
+                    )
                 latest = c.execute(
                     "SELECT COALESCE(MAX(seq),0) FROM voice_transcript WHERE call_id=?",
                     (call_id,),
@@ -868,9 +955,11 @@ def execute_tool(call_id: str, name: str, args: dict) -> dict:
                     or conditional
                     or "?" in answer["text"]
                 ):
-                    return {
-                        "error": "Qayta o‘qishdan keyingi aniq tasdiq yo‘q. Faqat 'ha, tasdiqlayman' kabi aniq javobni so‘rang."
-                    }
+                    return tool_error(
+                        "confirmation_required",
+                        "Qayta o‘qishdan keyingi aniq tasdiq yo‘q.",
+                        "Shu kelishuv to‘g‘rimi?",
+                    )
                 schedule = proposal.get(
                     "installments",
                     [{"amount": proposal["amount"], "due_on": proposal["due_on"]}],
@@ -928,6 +1017,13 @@ def execute_tool(call_id: str, name: str, args: dict) -> dict:
                         "instruction": "Murojaat avval saqlangan. Faqat muloyim xayrlashing.",
                     }
                 outcome = args.get("outcome")
+                recent_caller = c.execute(
+                    "SELECT text FROM voice_transcript WHERE call_id=? AND speaker='customer' AND is_final=1 ORDER BY seq DESC LIMIT 1",
+                    (call_id,),
+                ).fetchone()
+                paid_claim = bool(recent_caller and payment_claimed(recent_caller[0]))
+                if outcome in ("disputed", "no_agreement") and paid_claim:
+                    outcome = "payment_claimed"
                 allowed = {
                     "promise",
                     "no_agreement",
@@ -953,6 +1049,40 @@ def execute_tool(call_id: str, name: str, args: dict) -> dict:
                     if outcome == "promise"
                     else str(args.get("summary", ""))[:600]
                 )
+                if outcome == "payment_claimed" and paid_claim:
+                    summary = "Mijoz oldin to‘laganini aytdi. Tushumni menejer tekshirishi kerak. Bu gap asosida to‘lov yozilmadi."
+                last_issue = c.execute(
+                    "SELECT code FROM voice_tool_events WHERE call_id=? AND code<>'ok' ORDER BY seq DESC LIMIT 1",
+                    (call_id,),
+                ).fetchone()
+                if last_issue and re.search(
+                    r"texnik|nosozlik|technical|сбой", summary, re.IGNORECASE
+                ):
+                    labels = {
+                        "amount_required": "To‘lov summasi aniqlashtirilmagan.",
+                        "amount_mismatch": "To‘lov summasi qayta aniqlashtirilishi kerak.",
+                        "date_required": "To‘lov sanasi aniqlashtirilmagan.",
+                        "confirmation_required": "Kelishuvga yakuniy tasdiq olinmagan.",
+                        "available_balance": "Mavjud va’dani o‘zgartirish talabi tekshirilishi kerak.",
+                        "format_required": "To‘lov summasi yoki sanasi aniqlashtirilmagan.",
+                    }
+                    if last_issue[0] in labels:
+                        words = " ".join(
+                            r[0]
+                            for r in c.execute(
+                                "SELECT text FROM voice_transcript WHERE call_id=? AND speaker='customer' AND is_final=1 ORDER BY seq DESC LIMIT 8",
+                                (call_id,),
+                            )
+                        )
+                        if outcome == "human_requested" and not human_requested(words):
+                            return tool_error(
+                                last_issue[0],
+                                "Texnik nosozlik qayd etilmagan va mijoz menejerni so‘ramagan. Avval noaniq joyni aniqlashtiring.",
+                                labels[last_issue[0]],
+                            )
+                        summary = (
+                            labels[last_issue[0]] + " Menejer ko‘rib chiqishi kerak."
+                        )
                 if not summary.strip():
                     return {"error": "Mijoz aytgan holatni qisqa xulosada yozing."}
                 handoff_id = None
@@ -1009,6 +1139,10 @@ def execute_tool(call_id: str, name: str, args: dict) -> dict:
                 }
             return {"error": "Bunday vosita mavjud emas."}
     except (ValueError, TypeError, KeyError):
-        return {"error": "Summa yoki sana formati mos emas. Aniqlashtiring."}
+        return tool_error(
+            "format_required",
+            "Summa yoki sana formati mos emas.",
+            "Summani va qaysi kuni to‘lashingizni aniq aytasizmi?",
+        )
     except HTTPException as exc:
         return {"error": exc.detail}

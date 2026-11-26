@@ -23,6 +23,83 @@ from backend import voice
 from backend.main import app
 from scripts.evaluate_voice_quality import synthesize, wav_bytes
 
+SCENARIOS = {
+    "alo_schedule": {
+        "texts": [
+            "Alo, alo, eshityapsizmi?",
+            "Ha, men Akmal Karimovman. Gaplashish qulay.",
+            "Uch yuz mingni bugun beraman, qolganini ertaga beraman.",
+            "Ovozingiz uzildi, to‘lov jadvalini yana bir ayting.",
+            "Ha, to‘g‘ri, tasdiqlayman.",
+        ],
+        "plan_step": 2,
+        "amounts": [30000000, 270000000],
+        "outcomes": ["promise"],
+    },
+    "explicit_schedule": {
+        "texts": [
+            "Ha, men Akmal Karimovman. Gaplashish qulay.",
+            "Bir millionni bugun, ikki millionni ertaga to‘layman.",
+            "Ha, kelishdik, tasdiqlayman.",
+        ],
+        "plan_step": 1,
+        "amounts": [100000000, 200000000],
+        "outcomes": ["promise"],
+    },
+    "disputed": {
+        "texts": [
+            "Ha, men Akmal Karimovman.",
+            "Men bu mahsulotni olmaganman, menda bunday qarz yo‘q. Hisobni tekshiring.",
+        ],
+        "amounts": [],
+        "outcomes": ["disputed"],
+    },
+    "opt_out": {
+        "texts": [
+            "Alo, men Akmalman.",
+            "Menga boshqa avtomatik qo‘ng‘iroq qilmang. Roziligimni bekor qilaman.",
+        ],
+        "amounts": [],
+        "outcomes": ["opt_out"],
+    },
+    "conditional": {
+        "texts": [
+            "Ha, men Akmal Karimovman. Gaplashish qulay.",
+            "Pul tushsa, harakat qilaman. Hozircha aniq va’da bermayman.",
+            "Hozir aniq sana ham summa ham ayta olmayman. Menejeringiz bilan gaplashmoqchiman.",
+        ],
+        "amounts": [],
+        "outcomes": ["human_requested", "no_agreement"],
+    },
+    "already_paid": {
+        "texts": [
+            "Ha, men Akmal Karimovman.",
+            "Kecha qarzimni to‘liq to‘laganman. Men qayta to‘lamayman, menejeringiz tushumni tekshirsin.",
+        ],
+        "amounts": [],
+        "outcomes": ["payment_claimed"],
+    },
+    "correction": {
+        "texts": [
+            "Ha, men Akmal Karimovman. Gaplashish qulay.",
+            "Ertaga ikki million so‘m beraman.",
+            "Yo‘q, ikki million emas, ikki yuz ming so‘mni ertaga beraman dedim.",
+            "Ha, to‘g‘ri, tasdiqlayman.",
+        ],
+        "plan_step": 1,
+        "amounts": [20000000],
+        "outcomes": ["promise"],
+    },
+    "busy": {
+        "texts": [
+            "Alo, eshityapman.",
+            "Hozir bandman, gaplasha olmayman. Yaxshi qoling.",
+        ],
+        "amounts": [],
+        "outcomes": ["callback", "no_agreement"],
+    },
+}
+
 
 async def run(args):
     out = Path(args.out)
@@ -46,10 +123,17 @@ async def run(args):
             "Ha, to‘g‘ri, tasdiqlayman.",
         ]
     )
+    scenario = SCENARIOS.get(args.scenario, {})
+    texts = scenario.get("texts", texts)
+    label = args.scenario or args.language
     inputs = []
     for i, text in enumerate(texts):
-        variant = "-language-request" if args.language == "ru" and i in (0, 2) else ""
-        path = out / f"roundtrip-{args.language}-input-{i}{variant}.wav"
+        variant = (
+            "-language-request"
+            if not args.scenario and args.language == "ru" and i in (0, 2)
+            else ""
+        )
+        path = out / f"roundtrip-{label}-input-{i}{variant}.wav"
         if path.exists():
             with wave.open(str(path), "rb") as w:
                 pcm = w.readframes(w.getnframes())
@@ -126,7 +210,7 @@ async def run(args):
             )["id"]
             voice.change_status(call, "connected")
             # Only the Telegram transport is simulated. Run the REAL voice
-            # runtime, recognizers, reply guard, playout and accounting tools.
+            # runtime, direct audio, playout and accounting tools.
             from types import SimpleNamespace
             from unittest.mock import AsyncMock
 
@@ -150,6 +234,9 @@ async def run(args):
             inventory = {987654321: True}
             source = asyncio.Queue()
             played = bytearray()
+            timings = []
+            last_input_at = None
+            pending_audio_reply = False
 
             class Transport:
                 async def play(self, *unused):
@@ -159,7 +246,13 @@ async def run(args):
                     recorded.set()
 
                 async def send_frame(self, peer, device, frame):
+                    nonlocal pending_audio_reply
                     played.extend(frame)
+                    if pending_audio_reply and any(frame):
+                        timings.append(
+                            round(asyncio.get_running_loop().time() - last_input_at, 3)
+                        )
+                        pending_audio_reply = False
 
                 async def leave_call(self, peer):
                     inventory.clear()
@@ -190,10 +283,13 @@ async def run(args):
                 return row, rows
 
             async def feed():
+                nonlocal last_input_at, pending_audio_reply
                 await recorded.wait()
                 while True:
                     if not source.empty():
                         await runtime.incoming.put(source.get_nowait())
+                        last_input_at = asyncio.get_running_loop().time()
+                        pending_audio_reply = source.empty()
                     await asyncio.sleep(0.08)
 
             async def wait_reply(previous, require_proposal=False):
@@ -227,7 +323,12 @@ async def run(args):
             async def speak():
                 previous = 0
                 for index, pcm in enumerate(inputs):
-                    previous = await wait_reply(previous, require_proposal=index == 2)
+                    previous = await wait_reply(
+                        previous,
+                        require_proposal=index == scenario.get("plan_step", 1) + 1
+                        if scenario.get("amounts", [210000000])
+                        else False,
+                    )
                     for offset in range(0, len(pcm), 2560):
                         source.put_nowait(
                             pcm[offset : offset + 2560].ljust(2560, b"\0")
@@ -269,30 +370,45 @@ async def run(args):
                     task.cancel()
                 await asyncio.gather(speaker, sender, bridge, return_exceptions=True)
                 row, history = snapshot()
-                (out / f"roundtrip-{args.language}-history.json").write_text(
+                with database.read() as connection:
+                    tool_events = [
+                        dict(r)
+                        for r in connection.execute(
+                            "SELECT tool,code,created_at FROM voice_tool_events WHERE call_id=? ORDER BY seq",
+                            (call,),
+                        )
+                    ]
+                (out / f"roundtrip-{label}-history.json").write_text(
                     json.dumps(
                         {
                             "call_status": row["status"],
                             "error_code": row["error_code"],
                             "outcome": row["outcome"],
                             "transcript": history,
+                            "tool_events": tool_events,
+                            "reply_audio_gap_seconds": timings,
                         },
                         ensure_ascii=False,
                         indent=2,
                     ),
                     encoding="utf-8",
                 )
-                (out / f"roundtrip-{args.language}-played.wav").write_bytes(
+                (out / f"roundtrip-{label}-played.wav").write_bytes(
                     wav_bytes(bytes(played), 48000)
                 )
             replies = [r["text"] for r in history if r["speaker"] == "ai"]
             assert replies and all(uzbek_reply(t) for t in replies), replies
             data = http.get("/api/workspace", headers=headers()).json()
             promises = data["promises"]
-            assert len(promises) == 1 and promises[0]["amount"] == 210000000, promises
+            assert sorted(p["amount"] for p in promises) == sorted(
+                scenario.get("amounts", [210000000])
+            ), promises
+            assert row["outcome"] in scenario.get("outcomes", ["promise"]), row[
+                "outcome"
+            ]
             assert data["payments"] == []
             print(
-                "PASS: one confirmed 2 100 000 UZS promise; no payment or Telegram call.",
+                f"PASS: {label}; expected agreements/outcome; no payment or Telegram call.",
                 flush=True,
             )
             voice.runtime["ready"] = False
@@ -304,4 +420,5 @@ if __name__ == "__main__":
     parser.add_argument("--credentials")
     parser.add_argument("--out", default="backend/data/voice-evaluation")
     parser.add_argument("--language", choices=["uz", "ru"], default="uz")
+    parser.add_argument("--scenario", choices=list(SCENARIOS))
     asyncio.run(run(parser.parse_args()))

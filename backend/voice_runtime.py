@@ -14,6 +14,7 @@ from pathlib import Path
 from . import database, voice
 from .voice_audio import SpeechOutput
 from .voice_policy import TOOLS, instructions
+from .voice_tools import LiveTools
 from .voice_transcription import CustomerTranscription
 from .voice_turns import ClosingGate, OpeningGate
 
@@ -257,6 +258,7 @@ class VoiceRuntime:
             "turn": 0,
             "first_audio": False,
             "finish_at": None,
+            "caption_sequence": 0,
         }
         tasks = []
         opening = OpeningGate()
@@ -381,6 +383,58 @@ class VoiceRuntime:
                         if time.monotonic() - next_tick > 0.15:
                             next_tick = time.monotonic()
 
+                def execute_live_tool(name, args):
+                    if stop.is_set() or finish.is_set():
+                        return {
+                            "error": "Suhbat yakunlangan.",
+                            "error_code": "call_closed",
+                        }
+                    return voice.execute_tool(call_id, name, args)
+
+                async def respond_tools(responses):
+                    await live.send_tool_response(
+                        function_responses=[
+                            types.FunctionResponse(
+                                id=tool.id, name=tool.name, response=result
+                            )
+                            for tool, result in responses
+                        ]
+                    )
+
+                def completed_tool(result):
+                    if result.get("finish"):
+                        finish.set()
+                        state["finish_at"] = time.monotonic()
+                        # Gemini may say goodbye immediately before
+                        # the tool or after its response. Support both.
+                        with database.read() as c:
+                            last_ai = c.execute(
+                                "SELECT text FROM voice_transcript WHERE call_id=? AND speaker='ai' ORDER BY seq DESC LIMIT 1",
+                                (call_id,),
+                            ).fetchone()
+                        farewell = (last_ai[0] if last_ai else "").casefold()
+                        closing.request(
+                            time.monotonic(),
+                            any(
+                                word in farewell
+                                for word in (
+                                    "yaxshi qoling",
+                                    "xayr",
+                                    "salomat bo",
+                                    "до свидания",
+                                    "всего доброго",
+                                    "хорошего дня",
+                                )
+                            ),
+                        )
+
+                live_tools = LiveTools(
+                    execute_live_tool,
+                    respond_tools,
+                    completed_tool,
+                    lambda: state["caption_sequence"],
+                )
+
                 async def receive_model():
                     while True:
                         async for message in live.receive():
@@ -419,9 +473,12 @@ class VoiceRuntime:
                                             words,
                                             final,
                                         )
+                                        state["caption_sequence"] += 1
+                                        live_tools.caption()
                                 if (
                                     content.output_transcription
                                     and content.output_transcription.text
+                                    and closing.accepts_output
                                 ):
                                     flush("user")
                                     state["ai"] += content.output_transcription.text
@@ -434,7 +491,11 @@ class VoiceRuntime:
                                 if content.model_turn:
                                     flush("user")
                                     for part in content.model_turn.parts or []:
-                                        if part.inline_data and part.inline_data.data:
+                                        if (
+                                            part.inline_data
+                                            and part.inline_data.data
+                                            and closing.accepts_output
+                                        ):
                                             closing.output()
                                             self.output.write(
                                                 part.inline_data.data,
@@ -453,49 +514,13 @@ class VoiceRuntime:
                                     opening.greeting_complete = True
                                     if closing.requested_at is not None:
                                         closing.turn_complete = True
-                            if message.tool_call:
-                                flush("user")
-                                flush("ai")
-                                responses = []
-                                for tool in message.tool_call.function_calls:
-                                    result = voice.execute_tool(
-                                        call_id, tool.name, dict(tool.args or {})
-                                    )
-                                    responses.append(
-                                        types.FunctionResponse(
-                                            id=tool.id, name=tool.name, response=result
-                                        )
-                                    )
-                                    if result.get("finish"):
-                                        finish.set()
-                                        state["finish_at"] = time.monotonic()
-                                        # Gemini may say goodbye immediately before
-                                        # the tool or after its response. Support both.
-                                        with database.read() as c:
-                                            last_ai = c.execute(
-                                                "SELECT text FROM voice_transcript WHERE call_id=? AND speaker='ai' ORDER BY seq DESC LIMIT 1",
-                                                (call_id,),
-                                            ).fetchone()
-                                        farewell = (
-                                            last_ai[0] if last_ai else ""
-                                        ).casefold()
-                                        closing.request(
-                                            time.monotonic(),
-                                            any(
-                                                word in farewell
-                                                for word in (
-                                                    "yaxshi qoling",
-                                                    "xayr",
-                                                    "salomat bo",
-                                                    "до свидания",
-                                                    "всего доброго",
-                                                    "хорошего дня",
-                                                )
-                                            ),
-                                        )
-                                await live.send_tool_response(
-                                    function_responses=responses
+                            if message.tool_call_cancellation:
+                                live_tools.cancel(
+                                    message.tool_call_cancellation.ids or []
                                 )
+                            if message.tool_call:
+                                flush("ai")
+                                live_tools.submit(message.tool_call.function_calls)
 
                 async def monitor():
                     while time.monotonic() - connected_at < 300:
@@ -536,7 +561,13 @@ class VoiceRuntime:
 
                 tasks = [
                     asyncio.create_task(f())
-                    for f in (send_input, play_output, receive_model, monitor)
+                    for f in (
+                        send_input,
+                        play_output,
+                        receive_model,
+                        live_tools.run,
+                        monitor,
+                    )
                 ]
                 tasks.append(asyncio.create_task(stop.wait()))
                 await live.send_client_content(

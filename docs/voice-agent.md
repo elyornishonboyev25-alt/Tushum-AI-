@@ -40,9 +40,17 @@ Vositalar `error_code`, `recoverable` va kerak bo‘lsa `ask_customer` qaytaradi
 
 Modelning ichki subtitri va moliyaviy vositasi turli tartibda kelishi mumkin. Alohida vosita navbati audioni qabul qilishni bloklamaydi; faqat dalil yetishmagan xatoda yangi yakuniy subtitrni 650 ms gacha kutib, tekshiruvni bir marta takrorlaydi. Yangi gap kelmasa, dalil to‘qilmaydi. Model bekor qilgan tool ID bajarilmaydi va unga javob yuborilmaydi. Bu alohida STT yoki ikkinchi eshituvchi emas.
 
-Xayrlashuv audiosi allaqachon ijroga berilgan bo‘lsa, keyingi “Tugadi” yoki ikkinchi xayrlashuv ijroga berilmaydi. Navbatdagi haqiqiy audio tugagandan keyin aloqa yopiladi; gapning oxiri kesilmaydi.
+Xayrlashuv bir qisqa jumla bilan tugaydi: “Rahmat, yaxshi qoling.” Oldin qayta o‘qilgan summa/sana yana sanalmaydi va yangi savol berilmaydi. Model `finish_call` ni yubormasa ham aytilgan xayrlashuv suhbatni yakunlaydi. Mijoz xayrlashsa, yangi takliflar to‘xtaydi; oldingi o‘qilgan loyiha uchun yangi aniq tasdiq bilan birga xayrlashilgan bo‘lsa, o‘sha tasdiq bir marta tekshiriladi.
 
-Xayrlashuv matni uning oxirgi audio paketidan oldin kelsa ham joriy generatsiya oxirigacha qabul qilinadi. Keyingi javob faqat generatsiya tugagach bloklanadi; matnda xayrlashuv ko‘ringanining o‘zi ovozni kesmaydi.
+Audio navbati tugagach 250 ms tinish va monitorning 100 ms tekshiruvidan so‘ng avval Telegram aloqasi uziladi. AI WebSocket yopilishining sekin javobi telefonni ushlab turmaydi. Xayrlashuv matni audio paketidan oldin kelsa, joriy ovozning oxiri saqlanadi. Yakun signali kelmasa, so‘nggi audio paketidan 900 ms sukutda filtr oxiri chiqariladi; model umuman javob bermasa, eski 15 soniyalik kutish o‘rniga 4 soniyalik chegara ishlatiladi. Bu tarmoqdagi haqiqiy uzish vaqti uchun kafolat emas; vaqtlar server va simulyatsiyalangan transportda tekshiriladi.
+
+### Shu suhbat ichidagi xotira
+
+Har qo‘ng‘iroq uchun alohida `CallMemory` bor. Unda mijozning yakuniy qaydidan ism/kimlikka javob, gaplashish qulayligi, summa haqidagi gapi va sana haqidagi gapi kichik hajmda, asl so‘zlari bilan saqlanadi. Bu moliyaviy tasdiq yoki alohida STT emas. Aniqlashtirish so‘rovi javob o‘rniga yozilmaydi; miqdor tuzatilsa, oxirgi gap oldingisini almashtiradi. Boshqa savolga o‘tilganda oldingi summa va sana yo‘qolmaydi. Ma’lumot boshqa qo‘ng‘iroqqa avtomatik ko‘chirilmaydi.
+
+Mavjud native audio sessiyasiga `send_context_update` orqali xotira yangilanadi. Sun’iy mijoz gapi yuborilmaydi, ovoz ijrosi kutib turilmaydi va ikkinchi model chaqirilmaydi. Bir xil yangilanish qayta yuborilmaydi, yaqin hodisalar birlashtiriladi. Yangilash ishlamasa, native ovozli suhbat davom etadi. Modelga oldin javob berilgan savolni qaytarmaslik, faqat yetishmayotgan ma’lumotni so‘rash va bir noma’lum joyni ikki martadan ko‘p so‘ramaslik ko‘rsatiladi. Tanish va suhbat modeli hali ham xato qilishi mumkin; bu qat’iy xatosizlik kafolati emas.
+
+SDK kontekst yangilash tartibi: [Google GenAI `send_context_update`](https://googleapis.github.io/python-genai/genai.html). `--scenario memory_once`, `--scenario memory_partial` va `--scenario confirm_goodbye` ovozli regressiya sinovlari aytilgan ma’lumotni qayta so‘ramaslik va xayrlashuvdan keyingi uzish oralig‘ini tekshiradi.
 
 `voice_tool_events` faqat vosita nomi, xavfsiz natija kodi va vaqtini saqlaydi. Unda summa, mijoz matni, kalit yoki provayder xabari bo‘lmaydi. Bu kelgusida texnik uzilish bilan oddiy aniqlashtirishni ajratib tekshirishga yordam beradi. Eski suhbatlar natijasi qayta yozilmaydi.
 

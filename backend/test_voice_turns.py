@@ -2,7 +2,7 @@
 
 import unittest
 
-from .voice_turns import ClosingGate, OpeningGate
+from .voice_turns import ClosingGate, OpeningGate, spoken_farewell
 
 
 class TurnTimingTests(unittest.TestCase):
@@ -44,9 +44,9 @@ class TurnTimingTests(unittest.TestCase):
     def test_provider_stall_has_bounded_shutdown(self):
         gate = ClosingGate()
         gate.request(0)
-        self.assertFalse(gate.ready(14, True))
-        self.assertFalse(gate.ready(15, True))
-        self.assertTrue(gate.ready(16, True))
+        self.assertFalse(gate.ready(3.99, True))
+        self.assertFalse(gate.ready(4, True))
+        self.assertTrue(gate.ready(4.25, True))
 
     def test_goodbye_already_queued_blocks_a_second_generated_goodbye(self):
         gate = ClosingGate()
@@ -56,6 +56,38 @@ class TurnTimingTests(unittest.TestCase):
         self.assertFalse(gate.ready(2, False))
         self.assertFalse(gate.ready(3, True))
         self.assertTrue(gate.ready(4, True))
+
+    def test_disconnect_settles_for_250ms_after_actual_audio_drain(self):
+        gate = ClosingGate()
+        gate.request(1, True)
+        self.assertFalse(gate.ready(2, False))
+        self.assertFalse(gate.ready(3, True))
+        self.assertFalse(gate.ready(3.24, True))
+        self.assertTrue(gate.ready(3.25, True))
+
+    def test_missing_provider_end_signal_can_flush_a_farewell_tail(self):
+        gate = ClosingGate()
+        gate.generation_started()
+        gate.request(1, True)
+        gate.output(1.1)
+        self.assertFalse(gate.needs_audio_finish(1.9))
+        self.assertTrue(gate.needs_audio_finish(2.01))
+        gate.generation_finished()
+        gate.turn_complete = True
+        self.assertFalse(gate.ready(2.1, False))
+        self.assertFalse(gate.ready(2.3, True))
+        self.assertTrue(gate.ready(2.6, True))
+
+    def test_only_an_actual_spoken_goodbye_starts_automatic_closing(self):
+        for text in ("Rahmat, yaxshi qoling.", "Xayr!", "Mayli, salomat bo‘ling."):
+            self.assertTrue(spoken_farewell(text), text)
+        for text in (
+            "Hali xayr demang.",
+            "Xayr dedingizmi?",
+            "Xayrli kun, gaplashish qulaymi?",
+            "Qachon to‘laysiz?",
+        ):
+            self.assertFalse(spoken_farewell(text), text)
 
     def test_only_one_complete_reply_is_accepted_after_finish_tool(self):
         gate = ClosingGate()

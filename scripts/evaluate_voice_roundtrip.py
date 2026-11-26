@@ -98,6 +98,36 @@ SCENARIOS = {
         "amounts": [],
         "outcomes": ["callback", "no_agreement"],
     },
+    "memory_once": {
+        "texts": [
+            "Ha, men Akmal Karimovman. Hozir gaplashish qulay. Ertaga tushdan keyin ikki million yuz ming so‘m beraman.",
+            "Qaysi do‘kondan qo‘ng‘iroq qilyapsiz?",
+            "Ha, to‘g‘ri, tasdiqlayman.",
+        ],
+        "plan_step": 0,
+        "amounts": [210000000],
+        "outcomes": ["promise"],
+    },
+    "memory_partial": {
+        "texts": [
+            "Ha, men Akmal Karimovman. Hozir gaplashish qulay.",
+            "Besh yuz ming so‘m beraman.",
+            "Ertaga tushdan keyin.",
+            "Ha, to‘g‘ri, tasdiqlayman.",
+        ],
+        "plan_step": 2,
+        "amounts": [50000000],
+        "outcomes": ["promise"],
+    },
+    "confirm_goodbye": {
+        "texts": [
+            "Ha, men Akmal Karimovman. Hozir gaplashish qulay. Ertaga ikki million yuz ming so‘m beraman.",
+            "Ha, to‘g‘ri, tasdiqlayman. Rahmat, yaxshi qoling.",
+        ],
+        "plan_step": 0,
+        "amounts": [210000000],
+        "outcomes": ["promise"],
+    },
 }
 
 
@@ -234,6 +264,8 @@ async def run(args):
             inventory = {987654321: True}
             source = asyncio.Queue()
             played = bytearray()
+            last_generated_frame_at = None
+            disconnected_at = None
             timings = []
             last_input_at = None
             pending_audio_reply = False
@@ -246,8 +278,10 @@ async def run(args):
                     recorded.set()
 
                 async def send_frame(self, peer, device, frame):
-                    nonlocal pending_audio_reply
+                    nonlocal pending_audio_reply, last_generated_frame_at
                     played.extend(frame)
+                    if any(frame):
+                        last_generated_frame_at = asyncio.get_running_loop().time()
                     if pending_audio_reply and any(frame):
                         timings.append(
                             round(asyncio.get_running_loop().time() - last_input_at, 3)
@@ -255,6 +289,8 @@ async def run(args):
                         pending_audio_reply = False
 
                 async def leave_call(self, peer):
+                    nonlocal disconnected_at
+                    disconnected_at = asyncio.get_running_loop().time()
                     inventory.clear()
 
                 @property
@@ -387,6 +423,12 @@ async def run(args):
                             "transcript": history,
                             "tool_events": tool_events,
                             "reply_audio_gap_seconds": timings,
+                            "disconnect_after_audio_seconds": round(
+                                disconnected_at - last_generated_frame_at, 3
+                            )
+                            if disconnected_at is not None
+                            and last_generated_frame_at is not None
+                            else None,
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -398,6 +440,40 @@ async def run(args):
                 )
             replies = [r["text"] for r in history if r["speaker"] == "ai"]
             assert replies and all(uzbek_reply(t) for t in replies), replies
+            from backend.voice_memory import question_fields
+
+            if args.scenario == "memory_once":
+                # Every financial fact and identity was volunteered once; only
+                # the necessary readback confirmation may be asked thereafter.
+                caller_seq = next(
+                    r["seq"] for r in history if r["speaker"] == "customer"
+                )
+                self_questions = [
+                    r["text"]
+                    for r in history
+                    if r["speaker"] == "ai"
+                    and r["seq"] > caller_seq
+                    and question_fields(r["text"])
+                ]
+                assert not self_questions, self_questions
+            if args.scenario == "memory_partial":
+                offers = [
+                    r
+                    for r in history
+                    if r["speaker"] == "customer" and "Besh yuz" in r["text"]
+                ]
+                if offers:
+                    assert not [
+                        r["text"]
+                        for r in history
+                        if r["speaker"] == "ai"
+                        and r["seq"] > offers[0]["seq"]
+                        and "amount" in question_fields(r["text"])
+                    ], history
+            assert disconnected_at is not None and last_generated_frame_at is not None
+            assert disconnected_at - last_generated_frame_at < 1.2, (
+                disconnected_at - last_generated_frame_at
+            )
             data = http.get("/api/workspace", headers=headers()).json()
             promises = data["promises"]
             assert sorted(p["amount"] for p in promises) == sorted(

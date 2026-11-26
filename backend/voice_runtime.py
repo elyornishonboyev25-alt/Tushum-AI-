@@ -13,10 +13,11 @@ from pathlib import Path
 
 from . import database, voice
 from .voice_audio import SpeechOutput
+from .voice_memory import CallMemory, MemoryPublisher
 from .voice_policy import TOOLS, instructions
 from .voice_tools import LiveTools
 from .voice_transcription import CustomerTranscription
-from .voice_turns import ClosingGate, OpeningGate
+from .voice_turns import ClosingGate, OpeningGate, spoken_farewell
 
 log = logging.getLogger(__name__)
 
@@ -259,11 +260,13 @@ class VoiceRuntime:
             "first_audio": False,
             "finish_at": None,
             "caption_sequence": 0,
+            "caller_ended": False,
         }
         tasks = []
         opening = OpeningGate()
         closing = ClosingGate()
         customer_transcription = CustomerTranscription()
+        memory = CallMemory(fresh_context)
         ai = genai.Client(
             api_key=config["api_key"], http_options={"api_version": "v1beta"}
         )
@@ -324,8 +327,11 @@ class VoiceRuntime:
                 )
                 voice.change_status(call_id, "connected")
                 connected_at = time.monotonic()
+                memory_publisher = MemoryPublisher(
+                    live, fresh_context, memory, instructions, closing
+                )
 
-                def flush(who):
+                def flush(who, *, allow_closing=True):
                     if who == "user":
                         # Output audio/tool messages do not make an interim user
                         # hypothesis final. Input and output arrive independently.
@@ -342,6 +348,11 @@ class VoiceRuntime:
                         )
                         state[who] = ""
                         state[who + "_index"] += 1
+                        if memory.assistant(content):
+                            memory_publisher.changed.set()
+                        if allow_closing and spoken_farewell(content):
+                            # Hang up even if the model omitted finish_call.
+                            closing.request(time.monotonic(), goodbye_spoken=True)
 
                 async def send_input():
                     audio_open = False
@@ -384,12 +395,25 @@ class VoiceRuntime:
                             next_tick = time.monotonic()
 
                 def execute_live_tool(name, args):
-                    if stop.is_set() or finish.is_set():
+                    if (
+                        stop.is_set()
+                        or finish.is_set()
+                        or (
+                            state["caller_ended"]
+                            and name not in ("finish_call", "confirm_promise")
+                        )
+                    ):
                         return {
                             "error": "Suhbat yakunlangan.",
                             "error_code": "call_closed",
                         }
-                    return voice.execute_tool(call_id, name, args)
+                    result = voice.execute_tool(call_id, name, args)
+                    if state["caller_ended"] and "error" in result:
+                        result["instruction"] = (
+                            "Mijoz suhbatni tugatdi. Yangi savol bermang. Kelishuv saqlandi deb aytmang; qisqa xayrlashing."
+                        )
+                        result.pop("ask_customer", None)
+                    return result
 
                 async def respond_tools(responses):
                     await live.send_tool_response(
@@ -442,7 +466,7 @@ class VoiceRuntime:
                             if content:
                                 if content.interrupted:
                                     self.output.reset()
-                                    flush("ai")
+                                    flush("ai", allow_closing=False)
                                     state["turn"] += 1
                                 if (
                                     content.interim_input_transcription
@@ -475,6 +499,11 @@ class VoiceRuntime:
                                         )
                                         state["caption_sequence"] += 1
                                         live_tools.caption()
+                                        if memory.customer(words):
+                                            memory_publisher.changed.set()
+                                        if spoken_farewell(words):
+                                            state["caller_ended"] = True
+                                            closing.request(time.monotonic())
                                 if (
                                     content.output_transcription
                                     and content.output_transcription.text
@@ -483,6 +512,10 @@ class VoiceRuntime:
                                     closing.generation_started()
                                     flush("user")
                                     state["ai"] += content.output_transcription.text
+                                    if spoken_farewell(state["ai"]):
+                                        closing.request(
+                                            time.monotonic(), goodbye_spoken=True
+                                        )
                                     voice.transcript(
                                         call_id,
                                         f"ai-{state['ai_index']}",
@@ -498,7 +531,7 @@ class VoiceRuntime:
                                             and closing.accepts_output
                                         ):
                                             closing.generation_started()
-                                            closing.output()
+                                            closing.output(time.monotonic())
                                             self.output.write(
                                                 part.inline_data.data,
                                                 part.inline_data.mime_type
@@ -537,6 +570,10 @@ class VoiceRuntime:
                             voice.change_status(call_id, "cancelled")
                             stop.set()
                             return
+                        if closing.needs_audio_finish(time.monotonic()):
+                            self.output.finish()
+                            closing.generation_finished()
+                            closing.turn_complete = True
                         drained = self.output.drained
                         if closing.ready(time.monotonic(), drained):
                             stop.set()
@@ -560,7 +597,7 @@ class VoiceRuntime:
                         if peer.id not in await self.calls.calls:
                             stop.set()
                             return
-                        await asyncio.sleep(0.25)
+                        await asyncio.sleep(0.1)
                     stop.set()
 
                 tasks = [
@@ -569,6 +606,7 @@ class VoiceRuntime:
                         send_input,
                         play_output,
                         receive_model,
+                        memory_publisher.run,
                         live_tools.run,
                         monitor,
                     )
@@ -589,6 +627,17 @@ class VoiceRuntime:
                 for task in done:
                     if not task.cancelled() and task.exception():
                         raise task.exception()
+                stop.set()
+                for task in tasks:
+                    task.cancel()
+                # Disconnect the actual telephone BEFORE closing the provider
+                # WebSocket, whose handshake can take several seconds.
+                if self.active_peer:
+                    with suppress(Exception):
+                        await asyncio.wait_for(
+                            self.calls.leave_call(self.active_peer), 2
+                        )
+                    self.active_peer = None
                 flush("user")
                 flush("ai")
                 voice.change_status(call_id, "completed")

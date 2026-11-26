@@ -897,6 +897,12 @@ def _execute_tool(call_id: str, name: str, args: dict) -> dict:
                 )
                 # Numbers and conditions in a confirmation may be a correction.
                 allowed_words = {
+                    "xayr",
+                    "hayr",
+                    "qoling",
+                    "salomat",
+                    "boling",
+                    "sizga",
                     "boldi",
                     "kelishdik",
                     "xop",

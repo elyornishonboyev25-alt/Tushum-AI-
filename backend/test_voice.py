@@ -132,6 +132,26 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(data["payments"], [])
         self.assertEqual(data["debts"][0]["balance"], 100000000)
 
+    def test_clear_confirmation_can_end_with_thanks_and_goodbye(self):
+        call = self.start()
+        proposal = self.propose(call)
+        voice.transcript(
+            call,
+            "readback",
+            "ai",
+            "Besh yuz ming so‘m bugun. Shu kelishuv to‘g‘rimi?",
+            True,
+        )
+        voice.transcript(
+            call,
+            "answer",
+            "customer",
+            "Ha, to‘g‘ri, tasdiqlayman. Rahmat, yaxshi qoling.",
+            True,
+        )
+        result = voice.execute_tool(call, "confirm_promise", {"proposal_id": proposal})
+        self.assertTrue(result.get("saved"), result)
+
     def test_schedule_accepts_attached_uzbek_case_endings_and_remainder(self):
         call = self.start()
         voice.change_status(call, "connected")

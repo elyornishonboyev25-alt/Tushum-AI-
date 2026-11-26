@@ -132,6 +132,46 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(data["payments"], [])
         self.assertEqual(data["debts"][0]["balance"], 100000000)
 
+    def test_model_cannot_change_the_customers_spoken_amount(self):
+        call = self.start()
+        voice.change_status(call, "connected")
+        voice.transcript(
+            call,
+            "offer",
+            "customer",
+            "Bugun besh yuz ming so‘m beraman.",
+            True,
+            source="dedicated_stt_verbatim",
+        )
+        wrong = voice.execute_tool(
+            call, "propose_promise", {"amount": "600000", "due_on": today()}
+        )
+        self.assertIn("error", wrong)
+        correct = voice.execute_tool(
+            call, "propose_promise", {"amount": "500000", "due_on": today()}
+        )
+        self.assertIn("proposal_id", correct)
+
+    def test_corrected_amount_cannot_be_replaced_with_the_rejected_number(self):
+        call = self.start()
+        voice.change_status(call, "connected")
+        voice.transcript(
+            call,
+            "offer",
+            "customer",
+            "Sakkiz yuz ming emas, ikki yuz ming so‘m beraman.",
+            True,
+            source="dedicated_stt_verbatim",
+        )
+        wrong = voice.execute_tool(
+            call, "propose_promise", {"amount": "800000", "due_on": today()}
+        )
+        self.assertIn("error", wrong)
+        correct = voice.execute_tool(
+            call, "propose_promise", {"amount": "200000", "due_on": today()}
+        )
+        self.assertIn("proposal_id", correct)
+
     def test_refusal_partial_transcript_and_correction_are_not_confirmation(self):
         call = self.start()
         proposal = self.propose(call)
@@ -823,6 +863,9 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(
             transcription_config()["input_audio_transcription"]["mode"], "VERBATIM"
         )
+        self.assertEqual(config["speech_config"]["language_code"], "uz-UZ")
+        self.assertIn("ALWAYS answer", config["system_instruction"])
+        self.assertNotIn("switch to natural Russian", config["system_instruction"])
         self.assertIn("TWO SEPARATE TURNS", config["system_instruction"])
 
 

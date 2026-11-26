@@ -45,6 +45,18 @@ CASES = [
     ("uz-negation", "Men ertaga to‘lamayman. Hozir va’da bera olmayman."),
     ("ru-correction", "Не два миллиона, а двести тысяч сумов. Дату пока не обещаю."),
     ("uz-ambiguous", "Ikkida beraman, lekin summani hali aytmadim."),
+    (
+        "uz-self-correction",
+        "Besh yuz ming emas, olti yuz ellik ming so‘mni indinga beraman.",
+    ),
+    ("uz-half", "Bir yarim million so‘mni juma kuni beraman."),
+    ("uz-condition", "Pul tushsa, harakat qilaman. Hozircha aniq va’da bermayman."),
+    ("uz-denial", "Men bu mahsulotni olmaganman. Bunday qarzim yo‘q."),
+    ("ru-refusal", "Я не буду платить завтра. Не обещаю ни сумму, ни дату."),
+    (
+        "mixed-revised",
+        "Aka, не два миллиона, ikki yuz ellik ming so‘m, остальное пока не обещаю.",
+    ),
 ]
 
 
@@ -206,7 +218,7 @@ async def main(args):
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     client = genai.Client(api_key=key, http_options={"api_version": "v1beta"})
-    semaphore = asyncio.Semaphore(2)
+    semaphore = asyncio.Semaphore(args.concurrency)
     report = {
         "synthetic_audio_only": True,
         "judge_is_automated": True,
@@ -244,7 +256,16 @@ async def main(args):
         if args.mode in ("all", "voices"):
             await asyncio.gather(*(voice_case(v) for v in args.voices.split(",")))
         if args.mode in ("all", "asr"):
-            await asyncio.gather(*(asr_case(label, text) for label, text in CASES))
+            labels = (
+                set(args.cases.split(","))
+                if args.cases
+                else {label for label, _ in CASES}
+            )
+            if labels - {label for label, _ in CASES}:
+                raise ValueError("Unknown test case")
+            await asyncio.gather(
+                *(asr_case(label, text) for label, text in CASES if label in labels)
+            )
     finally:
         (out / f"report-{args.mode}.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -258,4 +279,6 @@ if __name__ == "__main__":
     parser.add_argument("--out", default="backend/data/voice-evaluation")
     parser.add_argument("--voices", default="Aoede,Iapetus,Charon,Kore")
     parser.add_argument("--mode", choices=["all", "voices", "asr"], default="all")
+    parser.add_argument("--cases", help="Comma-separated ASR case labels; default all")
+    parser.add_argument("--concurrency", type=int, choices=[1, 2], default=1)
     asyncio.run(main(parser.parse_args()))

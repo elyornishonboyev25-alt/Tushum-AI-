@@ -28,6 +28,7 @@ from .domain import (
     uid,
 )
 from .security import current_user
+from .voice_evidence import explicit_payment_values
 from .voice_policy import POLICY_VERSION
 from .voice_stt import STT_MODEL
 
@@ -356,6 +357,8 @@ def context_for(c, actor, debt):
         "currency": "UZS",
         "transcription_model": STT_MODEL,
         "transcription_mode": "VERBATIM",
+        "reply_language": "uz-UZ",
+        "recognition_review": "independent_audio_listener",
     }
 
 
@@ -732,6 +735,19 @@ def execute_tool(call_id: str, name: str, args: dict) -> dict:
                     }
                 debt = scoped(c, "debts", call["debt_id"], call["business_id"])
                 _, context = context_for(c, actor, debt)
+                evidence = set().union(
+                    *(
+                        explicit_payment_values(words, context["balance_som"])
+                        for words in utterances
+                    )
+                )
+                if any(
+                    part["amount"] not in {value * 100 for value in evidence}
+                    for part in installments
+                ):
+                    return {
+                        "error": "Taklifdagi summa mijoz aytgan summaga mos emas. Qancha to‘lashini aniq so‘rang; hisobdagi summadan taxmin qilmang."
+                    }
                 if amount > money(context["available_promise_som"]):
                     return {
                         "error": "Summa bo‘sh qoldiqdan katta. Mavjud va’dani o‘zgartirishni menejer ko‘rib chiqadi."

@@ -17,13 +17,10 @@ import numpy as np
 import soxr
 from fastapi.testclient import TestClient
 from google import genai
-from google.genai import types
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend import voice
 from backend.main import app
-from backend.voice_runtime import live_config
-from backend.voice_stt import STT_SOURCE, open_recognition
 from scripts.evaluate_voice_quality import synthesize, wav_bytes
 
 
@@ -36,9 +33,9 @@ async def run(args):
     ai = genai.Client(api_key=key, http_options={"api_version": "v1beta"})
     texts = (
         [
-            "Да, я Акмал Каримов. Сейчас удобно говорить.",
+            "Давайте по-русски. Да, я Акмал Каримов. Сейчас удобно говорить.",
             "Завтра после обеда два миллиона сто тысяч сумов переведу.",
-            "Не расслышал, пожалуйста повторите условия.",
+            "Не расслышал сумму. Пожалуйста повторите по-русски.",
             "Да, всё правильно, подтверждаю.",
         ]
         if args.language == "ru"
@@ -51,7 +48,8 @@ async def run(args):
     )
     inputs = []
     for i, text in enumerate(texts):
-        path = out / f"roundtrip-{args.language}-input-{i}.wav"
+        variant = "-language-request" if args.language == "ru" and i in (0, 2) else ""
+        path = out / f"roundtrip-{args.language}-input-{i}{variant}.wav"
         if path.exists():
             with wave.open(str(path), "rb") as w:
                 pcm = w.readframes(w.getnframes())
@@ -127,186 +125,168 @@ async def run(args):
                 {"debt_id": debt, "target": "voice_quality_test", "consent": True},
             )["id"]
             voice.change_status(call, "connected")
-            context = {
-                "business": "Baraka Savdo",
-                "customer": "Akmal Karimov",
-                "today": day,
-                "timezone": "Asia/Tashkent",
-                "balance_som": "3000000.00",
-                "available_promise_som": "3000000.00",
-            }
-            history = []
-            queue = asyncio.Queue()
-            done = asyncio.Event()
-            spoken = ""
-            turn = 0
-            audio = []
-            async with (
-                open_recognition(ai) as recognition,
-                ai.aio.live.connect(
-                    model="gemini-3.8-live", config=live_config(context)
-                ) as session,
-            ):
+            # Only the Telegram transport is simulated. Run the REAL voice
+            # runtime, recognizers, reply guard, playout and accounting tools.
+            from types import SimpleNamespace
+            from unittest.mock import AsyncMock
 
-                async def feed():
-                    while True:
-                        data = queue.get_nowait() if not queue.empty() else bytes(2560)
-                        await recognition.send(data)
-                        await asyncio.sleep(0.08)
+            from backend import database
+            from backend.voice_reply import uzbek_reply
+            from backend.voice_runtime import VoiceRuntime
 
-                async def receive_speech():
-                    index = 0
-                    async for speech in recognition.receive():
-                        if not speech.final:
-                            continue
-                        voice.transcript(
-                            call,
-                            f"stt-{index}",
-                            "customer",
-                            speech.text,
-                            True,
-                            source=STT_SOURCE,
-                        )
-                        index += 1
-                        history.append({"customer": speech.text, "source": STT_SOURCE})
-                        print(
-                            json.dumps(
-                                {"customer": speech.text, "source": STT_SOURCE},
-                                ensure_ascii=True,
-                            ),
-                            flush=True,
-                        )
-                        await session.send_client_content(
-                            turns={"role": "user", "parts": [{"text": speech.text}]},
-                            turn_complete=True,
-                        )
-
-                async def receive():
-                    nonlocal spoken, turn
-                    while True:
-                        async for event in session.receive():
-                            c = event.server_content
-                            if c:
-                                if (
-                                    c.output_transcription
-                                    and c.output_transcription.text
-                                ):
-                                    spoken += c.output_transcription.text
-                                    voice.transcript(
-                                        call,
-                                        f"ai-{turn}",
-                                        "ai",
-                                        spoken,
-                                        source="agent_output",
-                                    )
-                                for part in c.model_turn.parts if c.model_turn else []:
-                                    if part.inline_data and part.inline_data.data:
-                                        audio.append(part.inline_data.data)
-                                if c.turn_complete:
-                                    if spoken:
-                                        voice.transcript(
-                                            call,
-                                            f"ai-{turn}",
-                                            "ai",
-                                            spoken,
-                                            True,
-                                            source="agent_output",
-                                        )
-                                        history.append({"ai": spoken})
-                                        print(
-                                            json.dumps(
-                                                {"ai": spoken}, ensure_ascii=True
-                                            ),
-                                            flush=True,
-                                        )
-                                    if audio:
-                                        (
-                                            out
-                                            / f"roundtrip-{args.language}-reply-{turn}.wav"
-                                        ).write_bytes(wav_bytes(b"".join(audio)))
-                                    audio.clear()
-                                    spoken = ""
-                                    turn += 1
-                                    done.set()
-                            if event.tool_call:
-                                responses = []
-                                for tool in event.tool_call.function_calls:
-                                    result = voice.execute_tool(
-                                        call, tool.name, dict(tool.args or {})
-                                    )
-                                    history.append(
-                                        {"tool": tool.name, "result": result}
-                                    )
-                                    print(
-                                        json.dumps(
-                                            {"tool": tool.name, "result": result},
-                                            ensure_ascii=True,
-                                        ),
-                                        flush=True,
-                                    )
-                                    responses.append(
-                                        types.FunctionResponse(
-                                            id=tool.id, name=tool.name, response=result
-                                        )
-                                    )
-                                await session.send_tool_response(
-                                    function_responses=responses
-                                )
-
-                receiver = asyncio.create_task(receive())
-                sender = asyncio.create_task(feed())
-                speech_receiver = asyncio.create_task(receive_speech())
-
-                async def wait_reply():
-                    wait = asyncio.create_task(done.wait())
-                    try:
-                        finished, _ = await asyncio.wait(
-                            [receiver, speech_receiver, wait],
-                            timeout=45,
-                            return_when=asyncio.FIRST_COMPLETED,
-                        )
-                        if speech_receiver in finished:
-                            await speech_receiver
-                        if receiver in finished:
-                            await receiver
-                        if not finished:
-                            raise TimeoutError("No complete AI reply")
-                    finally:
-                        wait.cancel()
-                        await asyncio.gather(wait, return_exceptions=True)
-
-                try:
-                    await session.send_client_content(
-                        turns={
-                            "role": "user",
-                            "parts": [
-                                {
-                                    "text": "Qo‘ng‘iroq ulandi. Hozir faqat Assalomu alaykum deng, keyin tinglang."
-                                }
-                            ],
-                        },
-                        turn_complete=True,
+            runtime = VoiceRuntime()
+            runtime.client = SimpleNamespace(
+                get_entity=AsyncMock(
+                    return_value=SimpleNamespace(
+                        id=987654321,
+                        username="voice_quality_test",
+                        usernames=[],
+                        bot=False,
+                        is_self=False,
                     )
-                    await wait_reply()
-                    for pcm in inputs:
-                        done.clear()
-                        for offset in range(0, len(pcm), 2560):
-                            queue.put_nowait(
-                                pcm[offset : offset + 2560].ljust(2560, b"\0")
+                )
+            )
+            recorded = asyncio.Event()
+            inventory = {987654321: True}
+            source = asyncio.Queue()
+            played = bytearray()
+
+            class Transport:
+                async def play(self, *unused):
+                    return None
+
+                async def record(self, *unused):
+                    recorded.set()
+
+                async def send_frame(self, peer, device, frame):
+                    played.extend(frame)
+
+                async def leave_call(self, peer):
+                    inventory.clear()
+
+                @property
+                def calls(self):
+                    async def current():
+                        return inventory
+
+                    return current()
+
+            runtime.calls = Transport()
+
+            def snapshot():
+                with database.read() as conn:
+                    row = dict(
+                        conn.execute(
+                            "SELECT * FROM voice_calls WHERE id=?", (call,)
+                        ).fetchone()
+                    )
+                    rows = [
+                        dict(r)
+                        for r in conn.execute(
+                            "SELECT * FROM voice_transcript WHERE call_id=? ORDER BY seq",
+                            (call,),
+                        )
+                    ]
+                return row, rows
+
+            async def feed():
+                await recorded.wait()
+                while True:
+                    frame = source.get_nowait() if not source.empty() else bytes(2560)
+                    await runtime.incoming.put(frame)
+                    await asyncio.sleep(0.08)
+
+            async def wait_reply(previous, require_proposal=False):
+                quiet_at = None
+                async with asyncio.timeout(60):
+                    while True:
+                        row, rows = snapshot()
+                        if row["status"] in ("failed", "no_answer", "cancelled"):
+                            raise AssertionError("Runtime failed: " + row["error_code"])
+                        replies = [
+                            r for r in rows if r["speaker"] == "ai" and r["is_final"]
+                        ]
+                        latest = replies[-1]["seq"] if replies else 0
+                        proposal = json.loads(row["proposal_json"] or "{}")
+                        eligible = latest > previous and runtime.output.drained
+                        if require_proposal:
+                            eligible = (
+                                eligible
+                                and bool(proposal)
+                                and latest > proposal.get("after_seq", 0)
                             )
-                        await wait_reply()
-                        await asyncio.sleep(0.5)
-                finally:
-                    receiver.cancel()
-                    sender.cancel()
-                    speech_receiver.cancel()
-                    await asyncio.gather(
-                        receiver, sender, speech_receiver, return_exceptions=True
+                        if eligible:
+                            if quiet_at is None:
+                                quiet_at = asyncio.get_running_loop().time()
+                            if asyncio.get_running_loop().time() - quiet_at >= 0.4:
+                                return latest
+                        else:
+                            quiet_at = None
+                        await asyncio.sleep(0.05)
+
+            async def speak():
+                previous = 0
+                for index, pcm in enumerate(inputs):
+                    previous = await wait_reply(previous, require_proposal=index == 2)
+                    for offset in range(0, len(pcm), 2560):
+                        source.put_nowait(
+                            pcm[offset : offset + 2560].ljust(2560, b"\0")
+                        )
+                    # wait_reply must not reuse the preceding AI turn while the
+                    # caller audio is queued/in flight.
+                    while not source.empty():
+                        await asyncio.sleep(0.05)
+
+            with database.read() as conn:
+                queued = dict(
+                    conn.execute(
+                        "SELECT * FROM voice_calls WHERE id=?", (call,)
+                    ).fetchone()
+                )
+            voice.change_status(call, "queued")
+            config = {
+                "api_key": key,
+                "model": "gemini-3.8-live",
+                "caller": "isolated_qa_caller",
+            }
+            sender = asyncio.create_task(feed())
+            speaker = asyncio.create_task(speak())
+            bridge = asyncio.create_task(runtime.converse(queued, config))
+            try:
+                async with asyncio.timeout(240):
+                    done, _ = await asyncio.wait(
+                        [speaker, bridge], return_when=asyncio.FIRST_COMPLETED
                     )
-                    (out / f"roundtrip-{args.language}-history.json").write_text(
-                        json.dumps(history, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
+                    for task in done:
+                        await task
+                    if bridge in done and not speaker.done():
+                        row, _ = snapshot()
+                        raise AssertionError("Bridge ended early: " + row["error_code"])
+                    await speaker
+                    await bridge
+            finally:
+                for task in (speaker, sender, bridge):
+                    task.cancel()
+                await asyncio.gather(speaker, sender, bridge, return_exceptions=True)
+                row, history = snapshot()
+                (out / f"roundtrip-{args.language}-history.json").write_text(
+                    json.dumps(
+                        {
+                            "call_status": row["status"],
+                            "error_code": row["error_code"],
+                            "outcome": row["outcome"],
+                            "transcript": history,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                (out / f"roundtrip-{args.language}-played.wav").write_bytes(
+                    wav_bytes(bytes(played), 48000)
+                )
+            replies = [r["text"] for r in history if r["speaker"] == "ai"]
+            assert replies and all(uzbek_reply(t) for t in replies), replies
             data = http.get("/api/workspace", headers=headers()).json()
             promises = data["promises"]
             assert len(promises) == 1 and promises[0]["amount"] == 210000000, promises

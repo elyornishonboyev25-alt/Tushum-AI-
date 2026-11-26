@@ -32,6 +32,7 @@ bool activeCall(Json row) =>
 
 String voiceError(dynamic code) => switch (text(code)) {
   'stt_unavailable' => 'Nutqni yozib olish xizmati uzildi. Taxminiy matn asosida davom etilmadi. Qayta urinib ko‘ring.',
+  'voice_language' => 'AI javobini o‘zbekcha berishda xatolik bo‘ldi. Suhbatni qayta boshlang.',
   'audio_quality' => 'Ovoz oqimida uzilish bo‘ldi. Noaniq nutq asosida davom etilmadi. Ulanishni tekshiring.',
   'ai_quota' =>
     'AI xizmatining kvotasi tugagan. Google AI hisobidagi limitni tekshiring.',

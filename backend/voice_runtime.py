@@ -14,6 +14,7 @@ from pathlib import Path
 from . import database, voice
 from .voice_audio import SpeechOutput
 from .voice_policy import TOOLS, instructions
+from .voice_reply import ReplyAudio
 from .voice_stt import STT_SOURCE, RecognitionError, open_recognition
 from .voice_turns import ClosingGate, OpeningGate
 
@@ -55,11 +56,12 @@ def live_config(context, model="gemini-3.8-live", *, voice_name=None):
         "response_modalities": ["AUDIO"],
         "system_instruction": instructions(context),
         "speech_config": {
+            "language_code": "uz-UZ",
             "voice_config": {
                 "prebuilt_voice_config": {
                     "voice_name": voice_name or os.getenv("TUSHUM_VOICE_NAME", "Kore")
                 }
-            }
+            },
         },
         "output_audio_transcription": {},
         "tools": tools,
@@ -256,7 +258,10 @@ class VoiceRuntime:
             "user_speaking": False,
             "speech_started_at": None,
             "recognition_pending": False,
+            "language_pending": False,
+            "language_retries": 0,
         }
+        reply_audio = ReplyAudio()
         tasks = []
         opening = OpeningGate()
         closing = ClosingGate()
@@ -333,8 +338,16 @@ class VoiceRuntime:
                     if who == "user":
                         # Output audio/tool messages do not make an interim user
                         # hypothesis final. Input and output arrive independently.
-                        return
+                        return True
                     content = state[who]
+                    if not content and not reply_audio.size:
+                        return not state["language_pending"]
+                    chunks = reply_audio.release(content)
+                    if not chunks:
+                        state[who] = ""
+                        state["language_pending"] = True
+                        state["language_retries"] += 1
+                        return False
                     if content:
                         voice.transcript(
                             call_id,
@@ -346,6 +359,14 @@ class VoiceRuntime:
                         )
                         state[who] = ""
                         state[who + "_index"] += 1
+                    state["language_pending"] = False
+                    state["language_retries"] = 0
+                    if chunks:
+                        closing.output()
+                        for data, mime_type in chunks:
+                            self.output.write(data, mime_type)
+                        self.output.finish()
+                    return True
 
                 async def send_input():
                     while True:
@@ -361,6 +382,8 @@ class VoiceRuntime:
                         if not speech.final:
                             if not state["user_speaking"]:
                                 self.output.reset()
+                                reply_audio.reset()
+                                state["ai"] = ""
                                 state["user_speaking"] = True
                                 state["speech_started_at"] = time.monotonic()
                             state["recognition_pending"] = True
@@ -412,7 +435,8 @@ class VoiceRuntime:
                             if content:
                                 if content.interrupted:
                                     self.output.reset()
-                                    flush("ai")
+                                    reply_audio.reset()
+                                    state["ai"] = ""
                                     state["turn"] += 1
                                 # This session generates agent replies only. Neither its
                                 # input subtitles nor model text may become caller speech.
@@ -423,13 +447,6 @@ class VoiceRuntime:
                                 ):
                                     flush("user")
                                     state["ai"] += content.output_transcription.text
-                                    voice.transcript(
-                                        call_id,
-                                        f"ai-{state['ai_index']}",
-                                        "ai",
-                                        state["ai"],
-                                        source="agent_output",
-                                    )
                                 if content.model_turn:
                                     flush("user")
                                     for part in content.model_turn.parts or []:
@@ -438,22 +455,31 @@ class VoiceRuntime:
                                             and part.inline_data.data
                                             and not state["user_speaking"]
                                         ):
-                                            closing.output()
-                                            self.output.write(
+                                            reply_audio.write(
                                                 part.inline_data.data,
                                                 part.inline_data.mime_type
                                                 or "audio/pcm;rate=24000",
                                             )
-                                if content.generation_complete:
-                                    # Audio generation can finish before the full
-                                    # interaction: release the final filter samples now.
-                                    self.output.finish()
                                 if content.turn_complete:
                                     flush("user")
-                                    flush("ai")
-                                    self.output.finish()
+                                    valid = flush("ai")
+                                    if not valid:
+                                        if state["language_retries"] >= 2:
+                                            raise RuntimeError("voice_language")
+                                        await live.send_client_content(
+                                            turns={
+                                                "role": "user",
+                                                "parts": [
+                                                    {
+                                                        "text": "SERVER_NOTICE: Oxirgi javob ijro etilmadi. Uni faqat lotin yozuvidagi tabiiy o‘zbekcha gap bilan qaytaring. Ruscha so‘z yoki jumla aytmang. Bu mijoz gapi emas."
+                                                    }
+                                                ],
+                                            },
+                                            turn_complete=True,
+                                        )
                                     state["turn"] += 1
-                                    opening.greeting_complete = True
+                                    if valid:
+                                        opening.greeting_complete = True
                                     if closing.requested_at is not None:
                                         closing.turn_complete = True
                             if message.tool_call:
@@ -466,6 +492,10 @@ class VoiceRuntime:
                                             "error": "Suhbat yakunlangan. Yangi kelishuv saqlanmaydi."
                                         }
                                         if stop.is_set()
+                                        else {
+                                            "error": "Javob ijro etilmadi. Avval faqat tabiiy o‘zbek tilida javob bering."
+                                        }
+                                        if state["language_pending"]
                                         else {
                                             "error": "Mijoz hali gapirmoqda. Yakuniy javobni kuting; taxmin qilmang."
                                         }
@@ -544,7 +574,7 @@ class VoiceRuntime:
                             )
                         if (
                             state["speech_started_at"] is not None
-                            and time.monotonic() - state["speech_started_at"] > 35
+                            and time.monotonic() - state["speech_started_at"] > 55
                         ):
                             raise RecognitionError("stt_unavailable")
                         drained = self.output.drained
@@ -601,7 +631,10 @@ class VoiceRuntime:
                         raise task.exception()
                 stop.set()
                 await recognizer.finish()
-                flush("ai")
+                # A hangup must not promote an unfinished/unplayed reply to a
+                # completed AI utterance after the other party has left.
+                reply_audio.reset()
+                state["ai"] = ""
                 voice.change_status(call_id, "completed")
         except asyncio.CancelledError:
             voice.change_status(call_id, "failed", error_code="server_stopped")
@@ -614,7 +647,7 @@ class VoiceRuntime:
                 else "connection_failed"
             )
             if isinstance(exc, RecognitionError):
-                code = "stt_unavailable"
+                code = "ai_quota" if str(exc) == "ai_quota" else "stt_unavailable"
             elif "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc):
                 code = "ai_quota"
             elif "403" in str(exc) or "401" in str(exc):
@@ -640,6 +673,8 @@ class VoiceRuntime:
                 "incomplete_pcm_sample",
             ):
                 code = "audio_quality"
+            elif str(exc) == "voice_language":
+                code = "voice_language"
             voice.change_status(
                 call_id,
                 "no_answer" if code == "no_answer" else "failed",
@@ -654,6 +689,7 @@ class VoiceRuntime:
                 with suppress(Exception):
                     await self.calls.leave_call(self.active_peer)
             self.active_peer = None
+            reply_audio.reset()
             await ai.aio.aclose()
 
 

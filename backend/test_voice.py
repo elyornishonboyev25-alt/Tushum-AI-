@@ -172,6 +172,50 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(data["promises"][0]["amount"], 50000000)
         self.assertEqual(data["payments"], [])
 
+    def test_transcript_provenance_keeps_agent_and_customer_separate(self):
+        call = self.start()
+        voice.transcript(call, "ai-0", "ai", "Tushundim.", True, source="agent_output")
+        words = "Hali va’da bermadim, sanani aytmadim."
+        voice.transcript(
+            call, "stt-0", "customer", words, True, source="dedicated_stt_verbatim"
+        )
+        row = self.client.get("/api/voice/calls/" + call, headers=self.headers()).json()
+        self.assertEqual(
+            [(t["speaker"], t["source"]) for t in row["transcript"]],
+            [("ai", "agent_output"), ("customer", "dedicated_stt_verbatim")],
+        )
+        self.assertEqual(row["transcript"][1]["text"], words)
+        with self.assertRaises(ValueError):
+            voice.transcript(
+                call, "wrong", "customer", "Tushundim", True, source="agent_output"
+            )
+        with self.assertRaises(ValueError):
+            voice.transcript(
+                call,
+                "partial",
+                "customer",
+                "Ha",
+                False,
+                source="dedicated_stt_verbatim",
+            )
+
+    def test_existing_transcript_migration_keeps_original_text_and_is_idempotent(self):
+        from . import database
+
+        call = self.start()
+        voice.transcript(
+            call, "old-user", "customer", "Oldingi matn o‘zgarmasin.", True
+        )
+        with database.read() as c:
+            c.execute("ALTER TABLE voice_transcript DROP COLUMN source")
+        voice.initialize()
+        voice.initialize()
+        row = self.client.get(
+            "/api/voice/calls/" + call, headers=self.headers()
+        ).json()["transcript"][0]
+        self.assertEqual(row["text"], "Oldingi matn o‘zgarmasin.")
+        self.assertEqual(row["source"], "legacy")
+
     def test_spoken_russian_half_million_does_not_require_digits(self):
         call = self.start()
         voice.change_status(call, "connected")
@@ -768,10 +812,16 @@ class VoiceTests(unittest.TestCase):
 
     def test_bilingual_recognition_and_turn_policy(self):
         from .voice_runtime import live_config
+        from .voice_stt import transcription_config
 
         config = live_config({"business": "Baraka", "customer": "Ali"})
         self.assertEqual(
-            config["input_audio_transcription"]["language_codes"], ["uz-UZ", "ru-RU"]
+            transcription_config()["input_audio_transcription"]["language_codes"],
+            ["uz-UZ", "ru-RU"],
+        )
+        self.assertNotIn("input_audio_transcription", config)
+        self.assertEqual(
+            transcription_config()["input_audio_transcription"]["mode"], "VERBATIM"
         )
         self.assertIn("TWO SEPARATE TURNS", config["system_instruction"])
 

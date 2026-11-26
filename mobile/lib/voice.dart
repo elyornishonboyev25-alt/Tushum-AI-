@@ -31,6 +31,7 @@ bool activeCall(Json row) =>
     ['queued', 'dialing', 'connected'].contains(row['status']);
 
 String voiceError(dynamic code) => switch (text(code)) {
+  'stt_unavailable' => 'Nutqni yozib olish xizmati uzildi. Taxminiy matn asosida davom etilmadi. Qayta urinib ko‘ring.',
   'audio_quality' => 'Ovoz oqimida uzilish bo‘ldi. Noaniq nutq asosida davom etilmadi. Ulanishni tekshiring.',
   'ai_quota' =>
     'AI xizmatining kvotasi tugagan. Google AI hisobidagi limitni tekshiring.',
@@ -714,7 +715,7 @@ class _VoicePageState extends State<VoicePage> {
               ),
               const SizedBox(height: 6),
               const Text(
-                'Nutqdan olingan matnda xatolar bo‘lishi mumkin. Audio yozuvi saqlanmaydi.',
+                'Mijoz va AI gaplari alohida ko‘rsatiladi. Mijoz matni tahrirsiz STT natijasidir; audio yozuvi saqlanmaydi.',
                 style: TextStyle(color: Palette.muted, fontSize: 12),
               ),
               const SizedBox(height: 20),
@@ -765,6 +766,29 @@ class _VoicePageState extends State<VoicePage> {
                           text(item['text']),
                           style: const TextStyle(height: 1.6),
                         ),
+                        if (item['source'] == 'dedicated_stt_verbatim')
+                          const Padding(
+                            padding: EdgeInsets.only(top: 6),
+                            child: Text(
+                              'Mijoz nutqi · STT',
+                              style: TextStyle(
+                                color: Palette.muted,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        if (item['source'] == 'legacy' ||
+                            item['source'] == null)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 6),
+                            child: Text(
+                              'Avvalgi transkript',
+                              style: TextStyle(
+                                color: Palette.muted,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
                         if (item['is_final'] != 1 && live)
                           const Text(
                             'Gap davom etmoqda…',

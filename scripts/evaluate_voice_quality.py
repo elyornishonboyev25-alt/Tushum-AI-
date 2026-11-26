@@ -21,7 +21,7 @@ from google.genai import types
 from google.genai.errors import APIError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from backend.voice_runtime import live_config
+from backend.voice_stt import open_recognition
 
 SCRIPT = (
     "Assalomu alaykum. Men Baraka Savdoning Tushum AI yordamchisiman. "
@@ -165,53 +165,34 @@ async def recognize(client, pcm, noisy=False):
         rms = float(np.sqrt(np.mean(signal**2)))
         signal += np.random.default_rng(9).normal(0, rms / 10, len(signal))
     audio = np.clip(signal, -32768, 32767).astype("<i2").tobytes() + bytes(32000)
-    cfg = live_config(
-        {"business": "Baraka Savdo", "customer": "Sinov mijoz"}, voice_name="Iapetus"
-    )
-    cfg.pop("tools", None)
-    cfg["system_instruction"] = (
-        "Listen to the person's Uzbek/Russian audio. After they finish, say only 'Tushundim.' Never propose or record a payment."
-    )
     events = []
     parts = []
-    async with client.aio.live.connect(model="gemini-3.8-live", config=cfg) as session:
+    async with open_recognition(client) as recognizer:
 
-        async def send():
-            for offset in range(0, len(audio), 2560):
-                await session.send_realtime_input(
-                    audio=types.Blob(
-                        data=audio[offset : offset + 2560],
-                        mime_type="audio/pcm;rate=16000",
-                    )
-                )
-                await asyncio.sleep(0.08)
-            await session.send_realtime_input(audio_stream_end=True)
+        async def receive():
+            async for speech in recognizer.receive():
+                events.append({"text": speech.text, "final": speech.final})
+                if speech.final:
+                    parts.append(speech.text)
 
-        sender = asyncio.create_task(send())
+        receiver = asyncio.create_task(receive())
         try:
-            async with asyncio.timeout(60):
-                async for response in session.receive():
-                    c = response.server_content
-                    if not c:
-                        continue
-                    for field in ("interim_input_transcription", "input_transcription"):
-                        item = getattr(c, field, None)
-                        if item:
-                            events.append(
-                                {
-                                    "field": field,
-                                    "text": item.text,
-                                    "finished": getattr(item, "finished", None),
-                                }
-                            )
-                            if field == "input_transcription" and item.text:
-                                parts.append(item.text)
-                    if c.turn_complete and sender.done():
-                        break
+            for offset in range(0, len(audio), 2560):
+                await recognizer.send(audio[offset : offset + 2560])
+                await asyncio.sleep(0.08)
+            await recognizer.finish()
+            await asyncio.sleep(0.5)
+            if receiver.done():
+                await receiver
         finally:
-            sender.cancel()
-            await asyncio.gather(sender, return_exceptions=True)
-    return {"text": "".join(parts), "events": events, "noisy": noisy}
+            receiver.cancel()
+            await asyncio.gather(receiver, return_exceptions=True)
+    return {
+        "text": " ".join(parts),
+        "events": events,
+        "noisy": noisy,
+        "source": "dedicated_stt_verbatim",
+    }
 
 
 async def main(args):

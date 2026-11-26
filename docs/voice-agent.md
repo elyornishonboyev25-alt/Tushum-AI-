@@ -26,9 +26,15 @@ Standart model `gemini-3.8-live`, ovoz `Kore`. `TUSHUM_VOICE_NAME` orqali boshqa
 
 `backend/voice_policy.py` versiyalangan suhbat yo‘riqnomasi. Bu model vaznlarini qayta o‘qitish emas. Yo‘riqnoma mijozning savoliga birinchi javob berish, takrorlashni tushunish, tabiiy qisqa gapirish, tanaffusni kutish va noaniq gapni aniqlashtirishni belgilaydi. Birinchi tanishtiruvda AI ekanini ochiq aytadi.
 
-`input_audio_transcription` uchun `uz-UZ` va `ru-RU` til ko‘rsatmalari, biznes/mijoz nomlari va savdo atamalari lug‘ati yuboriladi. 320 ms oldingi ovoz konteksti va 900 ms sukut chegarasi gap boshini va tabiiy tanaffuslarni saqlashga yordam beradi. Ruscha so‘rovga ruscha, o‘zbekcha so‘rovga o‘zbekcha javob berish yo‘riqnomada belgilangan.
+2026-11-26 dan nutqni yozib olish suhbat modelidan ajratilgan. Oqim: **mijoz PCM ovozi → `gemini-3.5-transcribe-live` → yakuniy matn → `gemini-3.8-live` javobi**. STT faqat audio oladi; unga suhbat tarixi, qarz summasi, mijoz nomi, tayyor gaplar yoki system prompt yuborilmaydi. `VERBATIM`, `uz-UZ` va `ru-RU` ishlatiladi. `SMART` tahrirlash, tarjima va matnni generativ to‘ldirish qo‘llanmaydi. Suhbat modeli audio olmaydi va uning hech bir input/output subtitri mijoz gapi sifatida yozilmaydi.
 
-Vaqtinchalik `interim_input_transcription` moliyaviy tasdiq emas. Gemini 3.8 yakuniy `input_transcription` hodisasida `finished` maydonini yubormasligi mumkin; bu holat to‘liq yakuniy matn sifatida alohida qabul qilinadi. AI ovozi yoki tool hodisasi kelishi mijozning vaqtinchalik matnini avtomatik yakunlamaydi. Yakuniy matn oldingi taxminni almashtiradi; summa yoki inkorni taxminiy birlashtirish/tahrirlash bajarilmaydi.
+Faqat STT’ning yakuniy `input_transcription` hodisasi mijoz matni bo‘ladi. Vaqtinchalik `interim_input_transcription` faqat gapni bo‘lishni aniqlashga xizmat qiladi; dashboard yoki bazaga mijozning yakuniy gapi sifatida saqlanmaydi. Matn qayta yozilmaydi, o‘zbek lotin/kirill yozuvi va sonlarning xizmat qaytargan shakli saqlanadi. Masalan, mijoz haqiqatan “Tushundim” desa, bu so‘z o‘chirilmaydi; AI aytgan “Tushundim” esa faqat AI tomonida turadi.
+
+`voice_transcript.source` yangi yozuvlarda `dedicated_stt_verbatim` yoki `agent_output` bo‘ladi. Migratsiya avvalgi matnlarni o‘zgartirmasdan `legacy` bilan belgilaydi. Dashboard mijoz nutqi va AI javobini alohida ko‘rsatadi; avvalgi yozuvlar qayta eshitilgandek ko‘rsatilmaydi.
+
+320 ms boshlang‘ich audio konteksti, 900 ms provider sukut chegarasi va bir soniyalik mahalliy pauzadan keyingi yakunlash signali ishlatiladi. Sukut va juda past signal matn uchun dalil bo‘lmaydi. Bu signal tekshiruvi so‘zlarning semantik aniqligi yoki ishonch balli emas. Pauzadan keyin olti soniyada yakuniy matn kelmasa, AI qayta aytishni so‘raydi; vaqtinchalik taxmin tasdiqqa aylantirilmaydi. STT uzilsa, `stt_unavailable` qayd etiladi va suhbat modeli taxminiy transkript bilan uning o‘rnini bosmaydi. Kutish paytida moliyaviy vositalar bloklanadi.
+
+Bu ajratish alohida STT API oqimidan foydalanadi va uning kvotasi/xarajati bor; yangi provayder akkaunti talab qilinmaydi. Shovqin, juda past ovoz, sheva va aralash tildagi nutqda STT ham xato qilishi mumkin. Qo‘ng‘iroqdan oldin STT ulanishi ochiladi, ammo faqat yakuniy matn mavjudligi uning barcha so‘zlari to‘g‘ri ekanini anglatmaydi.
 
 Nutqni tanish va model qarorlarida xato bo‘lishi mumkin. Pul yozuvlari alohida server tekshiruvlaridan o‘tadi. “Да, всё правильно, спасибо” kabi aniq tasdiqlar tushuniladi; “да, но…”, shartli javob, summa/sana tuzatishi yoki savol ko‘rinishidagi “Да?” tasdiq sifatida saqlanmaydi. Inson kabi xatosiz gapirish yoki tushunish kafolati berilmaydi. Bu yangilanish model vaznlarini qayta o‘qitish emas: oqim, tanish sozlamalari va versiyalangan suhbat yo‘riqnomasi yaxshilangan.
 
@@ -67,7 +73,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Target ch
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Target web
 ```
 
-Server testlari bizneslar orasidagi ajratish, rozilik, ruxsat etilgan manzil, bir marta boshlash, bekor qilish, aniq tasdiq, muddat, qoldiq, to‘lovni taxmin qilmaslik va bo‘lib to‘lashning tranzaksiya yaxlitligini tekshiradi. `backend.test_voice_audio` ovoz uzunligi, spektr, paket chegaralari, gap oxiri va bo‘lishni; `backend.test_voice_transcription` vaqtinchalik/yakuniy matn va raqam/inkor yaxlitligini tekshiradi.
+Server testlari bizneslar orasidagi ajratish, rozilik, ruxsat etilgan manzil, bir marta boshlash, bekor qilish, aniq tasdiq, muddat, qoldiq, to‘lovni taxmin qilmaslik va bo‘lib to‘lashning tranzaksiya yaxlitligini tekshiradi. `backend.test_voice_audio` ovoz uzunligi, spektr, paket chegaralari, gap oxiri va bo‘lishni; `backend.test_voice_stt` alohida STT sozlamasi, manbalar ajratilishi, sukut/shovqin, vaqtinchalik matnni saqlamaslik, pauza va qayta so‘rashni tekshiradi. `backend.test_voice_transcription` eski oqimning yordamchi funksiyasini tekshiradi; yangi runtime undan foydalanmaydi.
 
 Sintetik ovoz va real API tekshiruvi noutbukdan bajariladi; Telegram sessiyasi ulanmaydi va hech kimga qo‘ng‘iroq yuborilmaydi:
 

@@ -1598,7 +1598,11 @@ class _TranscriptBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              ai ? 'Tushum AI' : 'Mijoz',
+              ai
+                  ? 'Tushum AI javobi'
+                  : message['source'] == 'dedicated_stt_verbatim'
+                  ? 'Mijoz nutqi · STT'
+                  : 'Mijoz',
               style: TextStyle(
                 fontSize: 10,
                 color: ai ? Palette.blue : Palette.muted,

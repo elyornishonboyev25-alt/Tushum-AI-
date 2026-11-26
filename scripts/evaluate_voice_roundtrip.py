@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend import voice
 from backend.main import app
 from backend.voice_runtime import live_config
-from backend.voice_transcription import CustomerTranscription
+from backend.voice_stt import STT_SOURCE, open_recognition
 from scripts.evaluate_voice_quality import synthesize, wav_bytes
 
 
@@ -136,25 +136,50 @@ async def run(args):
                 "available_promise_som": "3000000.00",
             }
             history = []
-            recognition = CustomerTranscription()
             queue = asyncio.Queue()
             done = asyncio.Event()
             spoken = ""
             turn = 0
             audio = []
-            async with ai.aio.live.connect(
-                model="gemini-3.8-live", config=live_config(context)
-            ) as session:
+            async with (
+                open_recognition(ai) as recognition,
+                ai.aio.live.connect(
+                    model="gemini-3.8-live", config=live_config(context)
+                ) as session,
+            ):
 
                 async def feed():
                     while True:
                         data = queue.get_nowait() if not queue.empty() else bytes(2560)
-                        await session.send_realtime_input(
-                            audio=types.Blob(
-                                data=data, mime_type="audio/pcm;rate=16000"
-                            )
-                        )
+                        await recognition.send(data)
                         await asyncio.sleep(0.08)
+
+                async def receive_speech():
+                    index = 0
+                    async for speech in recognition.receive():
+                        if not speech.final:
+                            continue
+                        voice.transcript(
+                            call,
+                            f"stt-{index}",
+                            "customer",
+                            speech.text,
+                            True,
+                            source=STT_SOURCE,
+                        )
+                        index += 1
+                        history.append({"customer": speech.text, "source": STT_SOURCE})
+                        print(
+                            json.dumps(
+                                {"customer": speech.text, "source": STT_SOURCE},
+                                ensure_ascii=True,
+                            ),
+                            flush=True,
+                        )
+                        await session.send_client_content(
+                            turns={"role": "user", "parts": [{"text": speech.text}]},
+                            turn_complete=True,
+                        )
 
                 async def receive():
                     nonlocal spoken, turn
@@ -162,35 +187,30 @@ async def run(args):
                         async for event in session.receive():
                             c = event.server_content
                             if c:
-                                item = c.input_transcription
-                                if item and item.text:
-                                    index, words, final = recognition.accept(
-                                        item.text, item.finished
-                                    )
-                                    voice.transcript(
-                                        call, f"user-{index}", "customer", words, final
-                                    )
-                                    history.append({"customer": words, "final": final})
-                                    print(
-                                        json.dumps(
-                                            {"customer": words, "final": final},
-                                            ensure_ascii=True,
-                                        ),
-                                        flush=True,
-                                    )
                                 if (
                                     c.output_transcription
                                     and c.output_transcription.text
                                 ):
                                     spoken += c.output_transcription.text
-                                    voice.transcript(call, f"ai-{turn}", "ai", spoken)
+                                    voice.transcript(
+                                        call,
+                                        f"ai-{turn}",
+                                        "ai",
+                                        spoken,
+                                        source="agent_output",
+                                    )
                                 for part in c.model_turn.parts if c.model_turn else []:
                                     if part.inline_data and part.inline_data.data:
                                         audio.append(part.inline_data.data)
                                 if c.turn_complete:
                                     if spoken:
                                         voice.transcript(
-                                            call, f"ai-{turn}", "ai", spoken, True
+                                            call,
+                                            f"ai-{turn}",
+                                            "ai",
+                                            spoken,
+                                            True,
+                                            source="agent_output",
                                         )
                                         history.append({"ai": spoken})
                                         print(
@@ -235,15 +255,18 @@ async def run(args):
 
                 receiver = asyncio.create_task(receive())
                 sender = asyncio.create_task(feed())
+                speech_receiver = asyncio.create_task(receive_speech())
 
                 async def wait_reply():
                     wait = asyncio.create_task(done.wait())
                     try:
                         finished, _ = await asyncio.wait(
-                            [receiver, wait],
+                            [receiver, speech_receiver, wait],
                             timeout=45,
                             return_when=asyncio.FIRST_COMPLETED,
                         )
+                        if speech_receiver in finished:
+                            await speech_receiver
                         if receiver in finished:
                             await receiver
                         if not finished:
@@ -276,7 +299,10 @@ async def run(args):
                 finally:
                     receiver.cancel()
                     sender.cancel()
-                    await asyncio.gather(receiver, sender, return_exceptions=True)
+                    speech_receiver.cancel()
+                    await asyncio.gather(
+                        receiver, sender, speech_receiver, return_exceptions=True
+                    )
                     (out / f"roundtrip-{args.language}-history.json").write_text(
                         json.dumps(history, ensure_ascii=False, indent=2),
                         encoding="utf-8",

@@ -36,8 +36,12 @@ class VoiceApi extends ApiClient {
       ...call,
       'brief': {'customer': 'Akmal Karimov'},
       'transcript': [
-        {'speaker': 'ai', 'text': 'Ertaga to‘lovni amalga oshira olasizmi?'},
-        {'speaker': 'customer', 'text': 'Ha, ertaga to‘layman.'},
+        {'speaker': 'ai', 'text': 'Tushundim.', 'source': 'agent_output'},
+        {
+          'speaker': 'customer',
+          'text': 'Ha, ertaga to‘layman.',
+          'source': 'dedicated_stt_verbatim',
+        },
       ],
     };
   }
@@ -92,8 +96,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 250));
       expect(find.text('Jonli suhbat · AI gaplashmoqda'), findsOneWidget);
       expect(find.text('Akmal Karimov · +998 90 123-45-67'), findsOneWidget);
-      expect(find.text('Tushum AI'), findsOneWidget);
-      expect(find.text('Mijoz'), findsOneWidget);
+      expect(find.text('Tushum AI javobi'), findsOneWidget);
+      expect(find.text('Mijoz nutqi · STT'), findsOneWidget);
+      expect(find.text('Tushundim.'), findsOneWidget);
       expect(find.text('Ha, ertaga to‘layman.'), findsOneWidget);
       expect(find.textContaining('Qarz: 3 000 000'), findsOneWidget);
       store.api.ended = true;

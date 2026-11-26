@@ -29,6 +29,7 @@ from .domain import (
 )
 from .security import current_user
 from .voice_policy import POLICY_VERSION
+from .voice_stt import STT_MODEL
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 Actor = Annotated[dict, Depends(current_user)]
@@ -90,6 +91,11 @@ def configured_owner_phone():
 def initialize():
     with database.read() as c:
         c.executescript(SCHEMA)
+        columns = {row[1] for row in c.execute("PRAGMA table_info(voice_transcript)")}
+        if "source" not in columns:
+            c.execute(
+                "ALTER TABLE voice_transcript ADD COLUMN source TEXT NOT NULL DEFAULT 'legacy'"
+            )
         owner_phone = configured_owner_phone()
         if owner_phone:
             owner = c.execute(
@@ -348,6 +354,8 @@ def context_for(c, actor, debt):
         "available_promise_som": f"{max(0, remaining - reserved) / 100:.2f}",
         "existing_promises_som": f"{reserved / 100:.2f}",
         "currency": "UZS",
+        "transcription_model": STT_MODEL,
+        "transcription_mode": "VERBATIM",
     }
 
 
@@ -604,14 +612,32 @@ def cancel_call(call_id: str, request: Request, actor: Actor):
     return perform(actor, request, "voice.cancel", {"id": call_id}, save)
 
 
-def transcript(call_id, utterance_id, speaker, text, final=False):
+def transcript(call_id, utterance_id, speaker, text, final=False, *, source="legacy"):
+    if source not in ("legacy", "agent_output", "dedicated_stt_verbatim"):
+        raise ValueError("invalid_transcript_source")
+    if (
+        source == "agent_output"
+        and speaker != "ai"
+        or source == "dedicated_stt_verbatim"
+        and (speaker != "customer" or not final)
+    ):
+        raise ValueError("invalid_transcript_provenance")
     if not text.strip():
         return
     with database.write() as c:
         c.execute(
-            "INSERT INTO voice_transcript(call_id,utterance_id,speaker,text,is_final,created_at,updated_at) VALUES (?,?,?,?,?,?,?) "
-            "ON CONFLICT(call_id,utterance_id) DO UPDATE SET text=excluded.text,is_final=excluded.is_final,updated_at=excluded.updated_at",
-            (call_id, utterance_id, speaker, text[:8000], int(final), now(), now()),
+            "INSERT INTO voice_transcript(call_id,utterance_id,speaker,text,is_final,created_at,updated_at,source) VALUES (?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(call_id,utterance_id) DO UPDATE SET text=excluded.text,is_final=excluded.is_final,updated_at=excluded.updated_at,source=excluded.source",
+            (
+                call_id,
+                utterance_id,
+                speaker,
+                text[:8000],
+                int(final),
+                now(),
+                now(),
+                source,
+            ),
         )
 
 

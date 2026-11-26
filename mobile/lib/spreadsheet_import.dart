@@ -24,7 +24,7 @@ class _SpreadsheetImportPageState extends State<SpreadsheetImportPage> {
   int limit = 50;
   String operationId = uuid.v4();
   String? submittedSelection;
-  bool showGuide = true;
+  bool showGuide = false;
   static const fieldNames = {
     'name': 'Mijoz ismi',
     'phone': 'Telefon raqami',

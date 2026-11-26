@@ -3,16 +3,18 @@
 import re
 from dataclasses import dataclass
 
+from .voice_evidence import latinized, normalized
+
 
 def spoken_farewell(text):
-    words = text.casefold().replace("‘", "'").replace("’", "'")
+    words = latinized(normalized(text))
     if "?" in words[-60:] or re.search(
         r"xayr\s+(?:dema|aytma)|hayr\s+(?:dema|aytma)", words
     ):
         return False
     return bool(
         re.search(
-            r"\b(?:xayr|hayr|yaxshi qoling|salomat bo['ʻʼ]?ling|до свидания|всего доброго)[.!…\s]*$",
+            r"\b(?:xayr|hayr|yaxshi qoling|salomat boling|do svidaniya|vsego dobrogo)[.!…\s]*$",
             words,
         )
     )

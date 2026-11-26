@@ -79,7 +79,14 @@ class TurnTimingTests(unittest.TestCase):
         self.assertTrue(gate.ready(2.6, True))
 
     def test_only_an_actual_spoken_goodbye_starts_automatic_closing(self):
-        for text in ("Rahmat, yaxshi qoling.", "Xayr!", "Mayli, salomat bo‘ling."):
+        for text in (
+            "Rahmat, yaxshi qoling.",
+            "Xayr!",
+            "Mayli, salomat bo‘ling.",
+            "Раҳмат, яхши қолинг.",
+            "Хайр!",
+            "До свидания.",
+        ):
             self.assertTrue(spoken_farewell(text), text)
         for text in (
             "Hali xayr demang.",

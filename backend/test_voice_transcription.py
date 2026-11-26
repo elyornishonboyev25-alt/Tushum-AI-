@@ -1,9 +1,27 @@
 import unittest
 
-from .voice_transcription import CustomerTranscription
+from .voice_transcription import CustomerTranscription, hesitation_only
 
 
 class TranscriptionTests(unittest.TestCase):
+    def test_only_hesitation_captions_are_silenced_in_both_scripts(self):
+        for text in ("Hmm.", "Mmm…", "Хм.", "Ммм", "Ee, hmm.", "Uh..."):
+            with self.subTest(text=text):
+                self.assertTrue(hesitation_only(text))
+        for text in (
+            "Ha.",
+            "Yo‘q.",
+            "Alo.",
+            "Да.",
+            "Нет.",
+            "Hmm, ha tasdiqlayman.",
+            "Ee, ertaga.",
+            "100",
+            "",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(hesitation_only(text))
+
     def test_missing_finished_flag_on_authoritative_input_is_final(self):
         turn = CustomerTranscription()
         self.assertEqual(

@@ -1,4 +1,4 @@
-"""Full-duplex Telegram PCM ↔ Gemini Live bridge. No audio files are retained."""
+"""Native Telegram PCM ↔ Gemini Live bridge. No audio files are retained."""
 
 from __future__ import annotations
 
@@ -13,10 +13,11 @@ from pathlib import Path
 
 from . import database, voice
 from .voice_audio import SpeechOutput
+from .voice_input import ListeningGate, SpeechInput
 from .voice_memory import CallMemory, MemoryPublisher
 from .voice_policy import TOOLS, instructions
 from .voice_tools import LiveTools
-from .voice_transcription import CustomerTranscription
+from .voice_transcription import CustomerTranscription, hesitation_only
 from .voice_turns import ClosingGate, OpeningGate, spoken_farewell
 
 log = logging.getLogger(__name__)
@@ -70,12 +71,8 @@ def live_config(context, model="gemini-3.8-live", *, voice_name=None):
         "output_audio_transcription": {},
         "tools": tools,
         "realtime_input_config": {
-            "automatic_activity_detection": {
-                "start_of_speech_sensitivity": "START_SENSITIVITY_HIGH",
-                "end_of_speech_sensitivity": "END_SENSITIVITY_LOW",
-                "prefix_padding_ms": 320,
-                "silence_duration_ms": 900,
-            }
+            "automatic_activity_detection": {"disabled": True},
+            "activity_handling": "NO_INTERRUPTION",
         },
     }
     if "extended-thinking" in model:
@@ -106,6 +103,7 @@ class VoiceRuntime:
         self.incoming = asyncio.Queue(maxsize=80)
         self.output = SpeechOutput()
         self.input_overflow = False
+        self.input_muted = True
 
     async def start(self):
         self.incoming = asyncio.Queue(maxsize=80)
@@ -171,7 +169,7 @@ class VoiceRuntime:
 
             @self.calls.on_update(filters.stream_frame(directions=Direction.INCOMING))
             async def receive_audio(_, update: StreamFrames):
-                if update.chat_id != self.active_peer:
+                if update.chat_id != self.active_peer or self.input_muted:
                     return
                 for frame in update.frames:
                     if self.incoming.full():
@@ -247,6 +245,7 @@ class VoiceRuntime:
         voice.change_status(call_id, "dialing")
         self.output.reset()
         self.input_overflow = False
+        self.input_muted = True
         while not self.incoming.empty():
             self.incoming.get_nowait()
         stop = asyncio.Event()
@@ -261,10 +260,13 @@ class VoiceRuntime:
             "finish_at": None,
             "caption_sequence": 0,
             "caller_ended": False,
+            "hesitation_only": False,
+            "suppress_generation": False,
         }
         tasks = []
         opening = OpeningGate()
         closing = ClosingGate()
+        listening = ListeningGate()
         customer_transcription = CustomerTranscription()
         memory = CallMemory(fresh_context)
         ai = genai.Client(
@@ -355,26 +357,52 @@ class VoiceRuntime:
                             closing.request(time.monotonic(), goodbye_spoken=True)
 
                 async def send_input():
-                    audio_open = False
+                    pipeline = SpeechInput()
+                    was_muted = True
                     while True:
                         try:
-                            data = await asyncio.wait_for(self.incoming.get(), 0.9)
+                            data = await asyncio.wait_for(self.incoming.get(), 0.05)
                         except TimeoutError:
-                            if audio_open:
-                                # Telegram can omit silence frames (DTX). End
-                                # that real audio segment, without inventing PCM
-                                # or sending a text turn to trigger the reply.
-                                await live.send_realtime_input(audio_stream_end=True)
-                                audio_open = False
+                            data = None
+                        if self.input_muted:
+                            if not was_muted:
+                                # Discard overlap and echo instead of replaying it
+                                # as a new customer turn when the microphone opens.
+                                if pipeline.active:
+                                    await live.send_realtime_input(
+                                        activity_end=types.ActivityEnd()
+                                    )
+                                pipeline.reset()
+                            was_muted = True
                             continue
+                        was_muted = False
                         if self.input_overflow:
                             raise RuntimeError("audio_input_overflow")
-                        await live.send_realtime_input(
-                            audio=types.Blob(
-                                data=data, mime_type="audio/pcm;rate=16000"
-                            )
+                        now = time.monotonic()
+                        events = (
+                            pipeline.feed(data, now) if data else pipeline.idle(now)
                         )
-                        audio_open = True
+                        for event in events:
+                            if event.kind == "start":
+                                state["hesitation_only"] = False
+                                # A silent/proactive model turn may omit its end
+                                # signal. Never carry a filler veto into new speech.
+                                state["suppress_generation"] = False
+                                opening.recipient_answered = True
+                                await live.send_realtime_input(
+                                    activity_start=types.ActivityStart()
+                                )
+                            elif event.kind == "audio":
+                                await live.send_realtime_input(
+                                    audio=types.Blob(
+                                        data=event.audio,
+                                        mime_type="audio/pcm;rate=16000",
+                                    )
+                                )
+                            else:
+                                await live.send_realtime_input(
+                                    activity_end=types.ActivityEnd()
+                                )
 
                 async def play_output():
                     next_tick = time.monotonic()
@@ -382,6 +410,15 @@ class VoiceRuntime:
                         frame = self.output.read_frame()
                         is_generated_audio = self.output.last_read_was_audio
                         await self.calls.send_frame(peer.id, Device.MICROPHONE, frame)
+                        if is_generated_audio:
+                            listening.last_played_at = time.monotonic()
+                        self.input_muted = listening.blocked(
+                            time.monotonic(),
+                            generating=closing.generation_active
+                            or not opening.greeting_complete,
+                            drained=self.output.drained,
+                            closing=closing.requested_at is not None,
+                        )
                         if is_generated_audio and not state["first_audio"]:
                             state["first_audio"] = True
                             voice.change_status(
@@ -395,6 +432,12 @@ class VoiceRuntime:
                             next_tick = time.monotonic()
 
                 def execute_live_tool(name, args):
+                    if state["hesitation_only"] or state["suppress_generation"]:
+                        return {
+                            "error": "Faqat ikkilanish tovushi eshitildi.",
+                            "error_code": "non_speech_input",
+                            "instruction": "Faqat ikkilanish tovushi eshitildi. Hech qanday amal bajarmang, savol bermang va jim kuting.",
+                        }
                     if (
                         stop.is_set()
                         or finish.is_set()
@@ -478,7 +521,14 @@ class VoiceRuntime:
                                             content.interim_input_transcription.text
                                         )
                                     )
-                                    # Internal provisional captions never drive the live audio.
+                                    state["hesitation_only"] = hesitation_only(words)
+                                    if not state["hesitation_only"]:
+                                        state["suppress_generation"] = False
+                                    if state["hesitation_only"]:
+                                        state["suppress_generation"] = True
+                                        self.output.reset()
+                                    # Provisional captions can veto filler output,
+                                    # but never authorize financial/account writes.
 
                                 if (
                                     content.input_transcription
@@ -489,6 +539,15 @@ class VoiceRuntime:
                                         content.input_transcription.text,
                                         content.input_transcription.finished,
                                     )
+                                    state["hesitation_only"] = hesitation_only(words)
+                                    if not state["hesitation_only"]:
+                                        state["suppress_generation"] = False
+                                    if state["hesitation_only"]:
+                                        state["suppress_generation"] = True
+                                        # Existing native captions can veto an
+                                        # accidental reply to humming. Never wait
+                                        # for a separate recognizer or invent text.
+                                        self.output.reset()
                                     if final:
                                         voice.transcript(
                                             call_id,
@@ -508,7 +567,10 @@ class VoiceRuntime:
                                     content.output_transcription
                                     and content.output_transcription.text
                                     and closing.accepts_output
+                                    and not state["hesitation_only"]
+                                    and not state["suppress_generation"]
                                 ):
+                                    self.input_muted = True
                                     closing.generation_started()
                                     flush("user")
                                     state["ai"] += content.output_transcription.text
@@ -529,7 +591,10 @@ class VoiceRuntime:
                                             part.inline_data
                                             and part.inline_data.data
                                             and closing.accepts_output
+                                            and not state["hesitation_only"]
+                                            and not state["suppress_generation"]
                                         ):
+                                            self.input_muted = True
                                             closing.generation_started()
                                             closing.output(time.monotonic())
                                             self.output.write(
@@ -543,6 +608,7 @@ class VoiceRuntime:
                                     # interaction: release the final filter samples now.
                                     self.output.finish()
                                 if content.turn_complete:
+                                    state["suppress_generation"] = False
                                     closing.generation_finished()
                                     flush("user")
                                     flush("ai")

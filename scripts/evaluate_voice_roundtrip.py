@@ -128,6 +128,16 @@ SCENARIOS = {
         "amounts": [210000000],
         "outcomes": ["promise"],
     },
+    "noise_patience": {
+        "texts": [
+            "Ha, men Akmal Karimovman. Hozir gaplashish qulay. Ertaga ikki million yuz ming so‘m beraman.",
+            "Ha, to‘g‘ri, tasdiqlayman. Rahmat, yaxshi qoling.",
+        ],
+        "plan_step": 0,
+        "amounts": [210000000],
+        "outcomes": ["promise"],
+        "quiet_probe_before": 1,
+    },
 }
 
 
@@ -171,6 +181,31 @@ async def run(args):
             pcm, _ = await synthesize(ai, text, "Aoede")
             path.write_bytes(wav_bytes(pcm))
         inputs.append(
+            soxr.resample(
+                np.frombuffer(pcm, dtype="<i2").astype(np.float32), 24000, 16000
+            )
+            .astype("<i2")
+            .tobytes()
+        )
+    if args.noise_snr is not None:
+        rng = np.random.default_rng(771)
+        for index, pcm in enumerate(inputs):
+            samples = np.frombuffer(pcm, dtype="<i2").astype(float)
+            scale = np.sqrt(np.mean(samples**2)) / 10 ** (args.noise_snr / 20)
+            # Half a second of ambient noise lets the filter learn its spectrum.
+            samples = np.concatenate((np.zeros(8000), samples, np.zeros(3200)))
+            samples += rng.normal(0, scale, len(samples))
+            inputs[index] = np.clip(samples, -32768, 32767).astype("<i2").tobytes()
+    hesitation = None
+    if "quiet_probe_before" in scenario:
+        path = out / "hesitation-only.wav"
+        if path.exists():
+            with wave.open(str(path), "rb") as w:
+                pcm = w.readframes(w.getnframes())
+        else:
+            pcm, _ = await synthesize(ai, "Hmm.", "Aoede")
+            path.write_bytes(wav_bytes(pcm))
+        hesitation = (
             soxr.resample(
                 np.frombuffer(pcm, dtype="<i2").astype(np.float32), 24000, 16000
             )
@@ -365,6 +400,26 @@ async def run(args):
                         if scenario.get("amounts", [210000000])
                         else False,
                     )
+                    print(f"QA: {label}; assistant turn {index + 1} played", flush=True)
+                    if index == scenario.get("quiet_probe_before"):
+                        rng = np.random.default_rng(19)
+                        noise = rng.normal(0, 400, 32000).astype("<i2").tobytes()
+                        noise = noise[:12000] + hesitation + noise[12000:]
+                        for offset in range(0, len(noise), 2560):
+                            source.put_nowait(
+                                noise[offset : offset + 2560].ljust(2560, b"\0")
+                            )
+                        while not source.empty():
+                            await asyncio.sleep(0.05)
+                        await asyncio.sleep(4)
+                        _, rows = snapshot()
+                        unexpected = [
+                            r["text"]
+                            for r in rows
+                            if r["speaker"] == "ai" and r["seq"] > previous
+                        ]
+                        assert not unexpected, ("Replied to noise/hmm", unexpected)
+                        print(f"QA: {label}; noise/hmm stayed silent", flush=True)
                     for offset in range(0, len(pcm), 2560):
                         source.put_nowait(
                             pcm[offset : offset + 2560].ljust(2560, b"\0")
@@ -497,4 +552,7 @@ if __name__ == "__main__":
     parser.add_argument("--out", default="backend/data/voice-evaluation")
     parser.add_argument("--language", choices=["uz", "ru"], default="uz")
     parser.add_argument("--scenario", choices=list(SCENARIOS))
+    parser.add_argument(
+        "--noise-snr", type=float, help="Mix seeded ambient noise at this SNR (dB)"
+    )
     asyncio.run(run(parser.parse_args()))

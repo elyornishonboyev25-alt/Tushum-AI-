@@ -1,6 +1,21 @@
 """Separate provisional subtitles from authoritative customer utterances."""
 
+import re
 from dataclasses import dataclass
+
+from .voice_evidence import latinized, normalized
+
+
+def hesitation_only(text: str) -> bool:
+    """A narrow veto for existing native captions, never another recognizer.
+
+    Do not classify short meaningful words (ha/yo‘q/alo/da/net) as hesitation.
+    A filler followed by any actual word is a meaningful turn, not a veto.
+    """
+    words = re.findall(r"[^\W_]+", latinized(normalized(text)))
+    return bool(words) and all(
+        re.fullmatch(r"[hx]+m+|m+(?:h+m*)?|u+h+|e{2,}|a{2,}", word) for word in words
+    )
 
 
 def merge_fragment(previous: str, fragment: str) -> str:

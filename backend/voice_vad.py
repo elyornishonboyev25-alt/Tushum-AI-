@@ -26,6 +26,9 @@ class SpeechDetector:
 
     def __init__(self):
         self.session = _session()
+        self.reset()
+
+    def reset(self):
         self.state = np.zeros((2, 1, 128), dtype=np.float32)
         self.context = np.zeros((1, 64), dtype=np.float32)
 
